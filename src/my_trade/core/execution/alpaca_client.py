@@ -167,6 +167,19 @@ class AlpacaBrokerClient:
         except APIError as exc:
             raise BrokerError(str(exc)) from exc
 
+    def close_position(self, symbol: str) -> OrderResult:
+        from alpaca.common.exceptions import APIError
+
+        # Alpaca crypto position symbols are unslashed (e.g. BTCUSD).
+        alpaca_symbol = symbol.replace("/", "")
+        try:
+            order = self._client.close_position(alpaca_symbol)
+        except _TRANSIENT_EXCEPTIONS as exc:
+            raise TransientBrokerError(str(exc)) from exc
+        except APIError as exc:
+            raise BrokerError(str(exc)) from exc
+        return self._map_order(order)
+
     def list_open_orders(self) -> list[OrderResult]:
         from alpaca.common.exceptions import APIError
         from alpaca.trading.enums import QueryOrderStatus

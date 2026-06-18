@@ -32,3 +32,7 @@ class BrokerClient(Protocol):
     def list_open_orders(self) -> list[OrderResult]:
         """Return currently working (non-terminal) orders."""
         ...
+
+    def close_position(self, symbol: str) -> OrderResult:
+        """Flatten the position in ``symbol`` (cancels related orders first)."""
+        ...

@@ -158,6 +158,34 @@ class ExecutionAdapter:
             risk_decision=decision,
         )
 
+    def close_position(self, symbol: str, *, now: datetime | None = None) -> ExecutionOutcome:
+        """Flatten an open position (used by the orchestrator for soft exits).
+
+        Bracket stop/take-profit legs live at the broker; this handles the
+        *discretionary* exits the strategy decides (time stop, RSI, etc.).
+        """
+        when = now or self._clock()
+        client_order_id = make_client_order_id(symbol, OrderIntent.EXIT, when)
+        try:
+            result: OrderResult = with_retries(
+                lambda: self._broker.close_position(symbol),
+                attempts=self._attempts,
+                sleep=self._sleep,
+            )
+        except BrokerError as exc:
+            return ExecutionOutcome(
+                status=ExecutionStatus.BROKER_ERROR,
+                client_order_id=client_order_id,
+                submitted=False,
+                detail=f"close failed after retries: {exc}",
+            )
+        return ExecutionOutcome(
+            status=ExecutionStatus.SUBMITTED,
+            client_order_id=client_order_id,
+            submitted=True,
+            order=result,
+        )
+
     def reconcile(self, client_order_id: str) -> OrderResult | None:
         """Fetch the current broker state for a previously-submitted order."""
         return self._broker.get_order_by_client_id(client_order_id)

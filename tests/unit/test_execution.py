@@ -80,6 +80,7 @@ class FakeBroker:
         self.submitted: list[OrderRequest] = []
         self.submit_calls = 0
         self.cancelled: list[str] = []
+        self.closed: list[str] = []
         self._transient_failures = transient_failures
         self._permanent_error = permanent_error
         self._existing = existing or {}
@@ -106,6 +107,16 @@ class FakeBroker:
 
     def list_open_orders(self) -> list[OrderResult]:
         return []
+
+    def close_position(self, symbol: str) -> OrderResult:
+        self.closed.append(symbol)
+        if self._permanent_error:
+            raise BrokerError("simulated close reject")
+        return OrderResult(
+            client_order_id=f"close-{symbol}",
+            status=OrderStatus.FILLED,
+            order_id="sim-close-1",
+        )
 
 
 def make_adapter(broker: FakeBroker, **kwargs: object) -> ExecutionAdapter:
@@ -316,6 +327,20 @@ class TestExecuteEntry:
         outcome = adapter.execute_entry(intent(), account(), now=NOW)
         assert outcome.status is ExecutionStatus.BROKER_ERROR
         assert broker.submit_calls == 1
+
+    def test_close_position_submits(self) -> None:
+        broker = FakeBroker()
+        outcome = make_adapter(broker).close_position("BTC/USD", now=NOW)
+        assert outcome.status is ExecutionStatus.SUBMITTED
+        assert outcome.submitted is True
+        assert broker.closed == ["BTC/USD"]
+        assert outcome.order is not None and outcome.order.is_filled
+
+    def test_close_position_broker_error(self) -> None:
+        broker = FakeBroker(permanent_error=True)
+        outcome = make_adapter(broker).close_position("BTC/USD", now=NOW)
+        assert outcome.status is ExecutionStatus.BROKER_ERROR
+        assert outcome.submitted is False
 
     def test_reconcile_returns_existing(self) -> None:
         cid = "mt-entry-BTCUSD-20260618T1407"
