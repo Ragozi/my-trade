@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My-Trade Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>My<span>-Trade</span> Dashboard</h1>
+      <p class="meta" id="config-band">Low-priced scalper</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:1rem">
+      <span id="mode-badge" class="badge badge-paper">Paper</span>
+      <button class="refresh-btn" id="refresh-btn">Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="kpi-grid">
+      <div class="kpi">
+        <label>Equity</label>
+        <div class="value" id="kpi-equity">—</div>
+      </div>
+      <div class="kpi">
+        <label>Day P&amp;L</label>
+        <div class="value" id="kpi-pnl">—</div>
+        <div class="sub" id="kpi-pnl-sub"></div>
+      </div>
+      <div class="kpi">
+        <label>Buying Power</label>
+        <div class="value" id="kpi-bp">—</div>
+      </div>
+      <div class="kpi">
+        <label>Open Positions</label>
+        <div class="value" id="kpi-positions">0</div>
+      </div>
+      <div class="kpi">
+        <label>Win Rate (Today)</label>
+        <div class="value" id="kpi-winrate">—</div>
+        <div class="sub" id="kpi-winrate-sub"></div>
+      </div>
+      <div class="kpi">
+        <label>Signals Today</label>
+        <div class="value" id="kpi-signals">0</div>
+      </div>
+      <div class="kpi">
+        <label>Entries Today</label>
+        <div class="value" id="kpi-entries">0</div>
+      </div>
+      <div class="kpi">
+        <label>Market</label>
+        <div class="value" id="kpi-market">—</div>
+      </div>
+    </section>
+
+    <section class="grid-2" style="margin-bottom:1.5rem">
+      <div class="panel">
+        <div class="panel-header">Eligible Universe</div>
+        <div class="panel-body">
+          <p class="meta" id="universe-meta" style="padding:0.75rem 1rem 0"></p>
+          <ul class="universe-list" id="universe-list"></ul>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">Open Positions</div>
+        <div class="panel-body">
+          <table id="positions-table">
+            <thead>
+              <tr><th>Symbol</th><th>Qty</th><th>Entry</th><th>uPnL</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="panel">
+        <div class="panel-header">Recent Events</div>
+        <div class="panel-body">
+          <table id="events-table">
+            <thead>
+              <tr><th>Time</th><th>Type</th><th>Symbol</th><th>Message</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">Trade Journal</div>
+        <div class="panel-body">
+          <table id="trades-table">
+            <thead>
+              <tr>
+                <th>Time</th><th>Symbol</th><th>Qty</th>
+                <th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Reason</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    My-Trade · localhost dashboard · auto-refresh 30s
+  </footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

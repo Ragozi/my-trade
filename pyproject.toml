@@ -1,0 +1,118 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my-trade"
+version = "0.0.0"
+description = "Fully automated, paper-first algorithmic trading system (deterministic core + guardrailed Claude research layer)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Ragozi" }]
+dependencies = [
+    "alpaca-py>=0.43.0",
+    "pandas>=2.0",
+    "pandas-ta>=0.3.14b",
+    "python-dotenv>=1.0",
+    "APScheduler>=3.10",
+    "requests>=2.31",
+    "pytz>=2024.1",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "poethepoet>=0.27",   # task runner: `poe test`, `poe lint`, `poe typecheck`
+]
+
+# Console entry point (the CLI is implemented in Phase 1; safe to declare now).
+# [project.scripts]
+# my-trade = "my_trade.__main__:main"
+
+# ---------------------------------------------------------------------------
+# Packaging — src/ layout. Only the my_trade package is installed; the legacy
+# flat prototype modules at the repo root are intentionally NOT packaged.
+# ---------------------------------------------------------------------------
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# ---------------------------------------------------------------------------
+# Task scripts (run with: poe <task>). Requires the [dev] extra.
+#   poe test       -> run the test suite
+#   poe lint       -> ruff lint
+#   poe fmt        -> ruff auto-fix + format
+#   poe typecheck  -> mypy on the deterministic package
+#   poe check      -> lint + typecheck + test (use before every commit)
+# ---------------------------------------------------------------------------
+[tool.poe.tasks]
+test = "pytest"
+"test:cov" = "pytest --cov=my_trade --cov-report=term-missing"
+lint = "ruff check ."
+fmt = { shell = "ruff check --fix . && ruff format ." }
+typecheck = "mypy"
+check = ["lint", "typecheck", "test"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+pythonpath = ["src"]          # import my_trade.* without an editable install
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+xfail_strict = false          # module-level xfail markers manage their own strictness
+
+# ---------------------------------------------------------------------------
+# Coverage (gate: >= 85% on the deterministic core — see SCOPE.md §6)
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["src/my_trade"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
+# ---------------------------------------------------------------------------
+# Ruff (lint + format)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = [".venv", "logs", "dashboard"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "SIM",      # flake8-simplify
+    "C4",       # comprehensions
+]
+
+# ---------------------------------------------------------------------------
+# mypy — strict on the new deterministic package only (prototype is excluded
+# until it is migrated module-by-module in Phase 1).
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["my_trade"]
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["pandas_ta.*", "alpaca.*", "apscheduler.*"]
+ignore_missing_imports = true
