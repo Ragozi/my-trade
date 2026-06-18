@@ -114,5 +114,5 @@ disallow_untyped_defs = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["pandas_ta.*", "alpaca.*", "apscheduler.*"]
+module = ["pandas", "pandas.*", "pandas_ta.*", "alpaca.*", "apscheduler.*"]
 ignore_missing_imports = true

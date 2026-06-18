@@ -6,3 +6,23 @@ Rules:
   - Settings are frozen and validated at startup (fail fast on misconfig).
   - Live trading requires PAPER_TRADING=false AND ALLOW_LIVE_TRADING=true.
 """
+
+from .settings import (
+    DEFAULT_CRYPTO_SYMBOL,
+    AlpacaSettings,
+    RiskSettings,
+    RuntimeSettings,
+    Settings,
+    StrategySettings,
+    load_settings,
+)
+
+__all__ = [
+    "DEFAULT_CRYPTO_SYMBOL",
+    "AlpacaSettings",
+    "RiskSettings",
+    "RuntimeSettings",
+    "Settings",
+    "StrategySettings",
+    "load_settings",
+]
