@@ -114,5 +114,11 @@ disallow_untyped_defs = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["pandas", "pandas.*", "pandas_ta.*", "alpaca.*", "apscheduler.*"]
+module = ["pandas", "pandas.*", "alpaca.*", "apscheduler.*"]
+ignore_missing_imports = true
+
+# pandas_ta ships incomplete/incorrect inline annotations; treat it as untyped.
+[[tool.mypy.overrides]]
+module = ["pandas_ta", "pandas_ta.*"]
+follow_imports = "skip"
 ignore_missing_imports = true
