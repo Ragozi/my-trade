@@ -7,3 +7,7 @@ Phase 1/3 migration target for `utils.py` (logging) and `slack_notify.py`.
     daily summary) — never per-scan spam.
   - Metrics/daily summary for backtest + live review.
 """
+
+from .journal import Journal, JournalEvent
+
+__all__ = ["Journal", "JournalEvent"]
