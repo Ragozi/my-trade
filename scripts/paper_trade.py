@@ -18,6 +18,7 @@ import argparse
 import logging
 import sys
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -27,14 +28,21 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from my_trade.config import Settings, load_settings  # noqa: E402
-from my_trade.core.execution import ExecutionAdapter, ExecutionMode  # noqa: E402
+from my_trade.core.execution import (  # noqa: E402
+    EntryIntent,
+    ExecutionAdapter,
+    ExecutionMode,
+    ExecutionOutcome,
+)
 from my_trade.core.execution.alpaca_client import AlpacaBrokerClient  # noqa: E402
 from my_trade.core.monitoring import (  # noqa: E402
+    ActionKind,
     CycleResult,
     DailyStateStore,
     TradingOrchestrator,
 )
 from my_trade.core.monitoring.alpaca_account import AlpacaAccountProvider  # noqa: E402
+from my_trade.core.risk import AccountState, RiskLimits  # noqa: E402
 from my_trade.core.strategy import PullbackStrategy, StrategyParams  # noqa: E402
 from my_trade.data.alpaca_data import AlpacaDataProvider  # noqa: E402
 from my_trade.observability import Journal  # noqa: E402
@@ -65,26 +73,53 @@ def refuse_if_live(settings: Settings) -> None:
         sys.exit(1)
 
 
-def build_orchestrator(settings: Settings) -> TradingOrchestrator:
-    data = AlpacaDataProvider.from_settings(settings)
-    account = AlpacaAccountProvider(
-        settings.alpaca.api_key, settings.alpaca.api_secret, paper=settings.alpaca.paper_trading
+@dataclass
+class Providers:
+    """The three live Alpaca I/O boundaries."""
+
+    data: AlpacaDataProvider
+    account: AlpacaAccountProvider
+    broker: AlpacaBrokerClient
+
+
+def build_providers(settings: Settings) -> Providers:
+    return Providers(
+        data=AlpacaDataProvider.from_settings(settings),
+        account=AlpacaAccountProvider(
+            settings.alpaca.api_key,
+            settings.alpaca.api_secret,
+            paper=settings.alpaca.paper_trading,
+        ),
+        broker=AlpacaBrokerClient(
+            settings.alpaca.api_key,
+            settings.alpaca.api_secret,
+            paper=settings.alpaca.paper_trading,
+        ),
     )
-    broker = AlpacaBrokerClient(
-        settings.alpaca.api_key, settings.alpaca.api_secret, paper=settings.alpaca.paper_trading
-    )
-    execution = ExecutionAdapter(
+
+
+def build_execution(settings: Settings, broker: AlpacaBrokerClient) -> ExecutionAdapter:
+    return ExecutionAdapter(
         broker,
         settings.risk.to_limits(),
         mode=ExecutionMode.PAPER,
         allow_live=ALLOW_LIVE,
     )
+
+
+def build_orchestrator(
+    settings: Settings,
+    *,
+    data: object,
+    account: object,
+    execution: object,
+) -> TradingOrchestrator:
     strategy = PullbackStrategy(StrategyParams.from_settings(settings))
     return TradingOrchestrator(
-        data=data,
+        data=data,  # type: ignore[arg-type]
         strategy=strategy,
-        execution=execution,
-        account=account,
+        execution=execution,  # type: ignore[arg-type]
+        account=account,  # type: ignore[arg-type]
         store=DailyStateStore(settings.runtime.daily_state_file),
         limits=settings.risk.to_limits(),
         symbols=settings.symbols,
@@ -97,49 +132,191 @@ def build_orchestrator(settings: Settings) -> TradingOrchestrator:
     )
 
 
-def connectivity_check(settings: Settings) -> int:
-    """Verify we can reach Alpaca (account + market data). Places NO orders."""
-    log.info("Connectivity check (read-only, no trading)...")
-    ok = True
+# --------------------------------------------------------------------------- #
+# Boundary-accounting wrappers: delegate to the real providers and tally calls
+# so the smoke-test summary can report exactly which boundaries were exercised.
+# --------------------------------------------------------------------------- #
+class _CountingData:
+    def __init__(self, inner: AlpacaDataProvider) -> None:
+        self._inner = inner
+        self.get_bars_calls = 0
 
-    account = AlpacaAccountProvider(
-        settings.alpaca.api_key, settings.alpaca.api_secret, paper=settings.alpaca.paper_trading
-    )
+    def get_bars(self, symbol: str, timeframe: str, limit: int | None = None):  # type: ignore[no-untyped-def]
+        self.get_bars_calls += 1
+        return self._inner.get_bars(symbol, timeframe, limit)
+
+    def get_latest_price(self, symbol: str) -> float | None:
+        return self._inner.get_latest_price(symbol)
+
+
+class _CountingAccount:
+    def __init__(self, inner: AlpacaAccountProvider) -> None:
+        self._inner = inner
+        self.snapshot_calls = 0
+
+    def get_snapshot(self):  # type: ignore[no-untyped-def]
+        self.snapshot_calls += 1
+        return self._inner.get_snapshot()
+
+
+class _CountingExecution:
+    def __init__(self, inner: ExecutionAdapter) -> None:
+        self._inner = inner
+        self.entry_attempts = 0
+        self.entry_submitted = 0
+        self.closes = 0
+
+    def execute_entry(
+        self, intent: EntryIntent, account: AccountState, *, now: datetime | None = None
+    ) -> ExecutionOutcome:
+        self.entry_attempts += 1
+        outcome = self._inner.execute_entry(intent, account, now=now)
+        if outcome.submitted:
+            self.entry_submitted += 1
+        return outcome
+
+    def close_position(self, symbol: str, *, now: datetime | None = None) -> ExecutionOutcome:
+        self.closes += 1
+        return self._inner.close_position(symbol, now=now)
+
+
+def describe_risk_limits(limits: RiskLimits) -> list[str]:
+    return [
+        f"R1 max risk / trade:   {limits.max_risk_per_trade_pct:.1%}",
+        f"R2 max open risk:      {limits.max_total_open_risk_pct:.1%}",
+        f"R3 daily loss limit:   {limits.daily_loss_limit_pct:.1%}",
+        f"R4 drawdown breaker:   {limits.max_drawdown_pct:.1%}",
+        f"max concurrent posns:  {limits.max_concurrent_positions}",
+    ]
+
+
+def run_health_checks(settings: Settings, providers: Providers) -> bool:
+    """Exercise all three Alpaca boundaries (read-only) + confirm risk limits."""
+    log.info("=== Health checks (read-only; no orders placed) ===")
+    ok = True
+    symbol = settings.symbols[0]
+
     try:
-        snap = account.get_snapshot()
+        snap = providers.account.get_snapshot()
         log.info(
-            "Account API OK | equity=$%.2f cash=$%.2f open_positions=%d",
+            "[OK]   Account API     | equity=$%.2f cash=$%.2f open_positions=%d",
             snap.equity,
             snap.cash,
             len(snap.positions),
         )
     except Exception as exc:
-        log.error("Account API unreachable: %s", exc)
+        log.error("[FAIL] Account API     | %s", exc)
         ok = False
 
-    data = AlpacaDataProvider.from_settings(settings)
-    symbol = settings.symbols[0]
     try:
-        bars = data.get_bars(symbol, settings.runtime.entry_timeframe, limit=10)
+        bars = providers.data.get_bars(symbol, settings.runtime.entry_timeframe, limit=10)
         if bars.empty:
-            log.warning("Data API reachable but returned no bars for %s", symbol)
+            log.warning("[WARN] Data API        | reachable but returned no bars for %s", symbol)
         else:
             log.info(
-                "Data API OK | %s %s: %d bars, last close=$%.2f",
+                "[OK]   Data API        | %s %s: %d bars, last close=$%.2f",
                 symbol,
                 settings.runtime.entry_timeframe,
                 len(bars),
                 float(bars.iloc[-1]["close"]),
             )
     except Exception as exc:
-        log.error("Data API unreachable: %s", exc)
+        log.error("[FAIL] Data API        | %s", exc)
         ok = False
 
-    if ok:
-        log.info("Connectivity check PASSED.")
-        return 0
-    log.error("Connectivity check FAILED.")
-    return 1
+    try:
+        open_orders = providers.broker.list_open_orders()
+        log.info("[OK]   Execution API   | reachable (open orders: %d)", len(open_orders))
+    except Exception as exc:
+        log.error("[FAIL] Execution API   | %s", exc)
+        ok = False
+
+    log.info("[OK]   Risk limits loaded:")
+    for line in describe_risk_limits(settings.risk.to_limits()):
+        log.info("           %s", line)
+
+    log.info("=== Health checks %s ===", "PASSED" if ok else "FAILED")
+    return ok
+
+
+def _summary_label(result: CycleResult) -> str:
+    if any(a.kind is ActionKind.ERROR for a in result.actions):
+        return "FAIL (cycle error)"
+    if result.halted and result.halt_reason is not None:
+        return f"PASS (entries halted: {result.halt_reason.value})"
+    if any(a.kind is ActionKind.ENTRY_REJECTED for a in result.actions):
+        return "PASS (entry rejected by risk gate)"
+    if any(a.kind is ActionKind.ENTRY_SUBMITTED for a in result.actions):
+        return "PASS (entry submitted)"
+    return "PASS (no action this cycle)"
+
+
+def print_cycle_summary(
+    settings: Settings,
+    result: CycleResult,
+    journaled: int,
+    data: _CountingData,
+    account: _CountingAccount,
+    execution: _CountingExecution,
+) -> None:
+    log.info("================= SMOKE TEST SUMMARY =================")
+    log.info("Cycle time (UTC):   %s", result.timestamp.isoformat())
+    log.info("Equity:             $%.2f", result.equity)
+    log.info("Day P&L:            $%.2f", result.day_pnl)
+    log.info("Peak equity:        $%.2f", result.peak_equity)
+    log.info("Open positions:     %d", result.open_positions)
+    log.info(
+        "Halted:             %s",
+        result.halt_reason.value if (result.halted and result.halt_reason) else "no",
+    )
+    log.info("Actions (%d):", len(result.actions))
+    for action in result.actions:
+        log.info(
+            "   - %-18s %-10s %s",
+            action.kind.value,
+            action.symbol,
+            action.detail or action.status,
+        )
+    log.info("Boundaries exercised:")
+    log.info("   data.get_bars:        %d", data.get_bars_calls)
+    log.info("   account.get_snapshot: %d", account.snapshot_calls)
+    log.info(
+        "   orders attempted:     %d (submitted %d)",
+        execution.entry_attempts,
+        execution.entry_submitted,
+    )
+    log.info("   position closes:      %d", execution.closes)
+    log.info("Journal:            wrote %d event(s) to %s", journaled, settings.runtime.journal_db)
+    log.info("Result:             %s", _summary_label(result))
+    log.info("=====================================================")
+
+
+def run_once(settings: Settings) -> int:
+    log.info("Smoke test: single PAPER cycle (--once) | symbols=%s", ",".join(settings.symbols))
+    providers = build_providers(settings)
+
+    if not run_health_checks(settings, providers):
+        log.error("Aborting --once: health checks failed (see above).")
+        return 1
+
+    data = _CountingData(providers.data)
+    account = _CountingAccount(providers.account)
+    execution = _CountingExecution(build_execution(settings, providers.broker))
+    orchestrator = build_orchestrator(settings, data=data, account=account, execution=execution)
+
+    journal = Journal(settings.runtime.journal_db)
+    try:
+        result = orchestrator.run_cycle(datetime.now(UTC))
+    except Exception as exc:
+        log.exception("Cycle raised an exception: %s", exc)
+        journal.record_event("error", detail=str(exc))
+        journal.close()
+        return 1
+
+    journaled = journal.log_cycle(result)
+    journal.close()
+    print_cycle_summary(settings, result, journaled, data, account, execution)
+    return 1 if any(a.kind is ActionKind.ERROR for a in result.actions) else 0
 
 
 def log_cycle(result: CycleResult) -> None:
@@ -159,44 +336,13 @@ def log_cycle(result: CycleResult) -> None:
         )
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Paper-only trading runner.")
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="connectivity check only (read-only; reaches Alpaca, places no orders)",
+def run_loop(settings: Settings) -> int:
+    providers = build_providers(settings)
+    execution = build_execution(settings, providers.broker)
+    orchestrator = build_orchestrator(
+        settings, data=providers.data, account=providers.account, execution=execution
     )
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="run a single trading cycle then exit (instead of looping)",
-    )
-    args = parser.parse_args(argv)
-
-    setup_logging()
-    settings = load_settings()
-    try:
-        settings.validate_for_trading()
-    except ValueError as exc:
-        log.error("Invalid settings: %s", exc)
-        return 1
-    refuse_if_live(settings)
-
-    if args.check:
-        return connectivity_check(settings)
-
-    orchestrator = build_orchestrator(settings)
     journal = Journal(settings.runtime.journal_db)
-
-    if args.once:
-        log.info("Running a single PAPER cycle | symbols=%s", ",".join(settings.symbols))
-        try:
-            result = orchestrator.run_cycle(datetime.now(UTC))
-            log_cycle(result)
-            journal.log_cycle(result)
-        finally:
-            journal.close()
-        return 0
 
     interval = max(settings.runtime.scan_interval_seconds, 5)
     log.info(
@@ -230,6 +376,36 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         journal.close()
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Paper-only trading runner.")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="health checks only (read-only; reaches Alpaca, places no orders)",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="run a single trading cycle then exit (smoke test with summary)",
+    )
+    args = parser.parse_args(argv)
+
+    setup_logging()
+    settings = load_settings()
+    try:
+        settings.validate_for_trading()
+    except ValueError as exc:
+        log.error("Invalid settings: %s", exc)
+        return 1
+    refuse_if_live(settings)
+
+    if args.check:
+        return 0 if run_health_checks(settings, build_providers(settings)) else 1
+    if args.once:
+        return run_once(settings)
+    return run_loop(settings)
 
 
 if __name__ == "__main__":
