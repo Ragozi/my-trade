@@ -14,6 +14,7 @@ PAPER mode with allow_live=False.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 import time
@@ -96,6 +97,51 @@ def build_orchestrator(settings: Settings) -> TradingOrchestrator:
     )
 
 
+def connectivity_check(settings: Settings) -> int:
+    """Verify we can reach Alpaca (account + market data). Places NO orders."""
+    log.info("Connectivity check (read-only, no trading)...")
+    ok = True
+
+    account = AlpacaAccountProvider(
+        settings.alpaca.api_key, settings.alpaca.api_secret, paper=settings.alpaca.paper_trading
+    )
+    try:
+        snap = account.get_snapshot()
+        log.info(
+            "Account API OK | equity=$%.2f cash=$%.2f open_positions=%d",
+            snap.equity,
+            snap.cash,
+            len(snap.positions),
+        )
+    except Exception as exc:
+        log.error("Account API unreachable: %s", exc)
+        ok = False
+
+    data = AlpacaDataProvider.from_settings(settings)
+    symbol = settings.symbols[0]
+    try:
+        bars = data.get_bars(symbol, settings.runtime.entry_timeframe, limit=10)
+        if bars.empty:
+            log.warning("Data API reachable but returned no bars for %s", symbol)
+        else:
+            log.info(
+                "Data API OK | %s %s: %d bars, last close=$%.2f",
+                symbol,
+                settings.runtime.entry_timeframe,
+                len(bars),
+                float(bars.iloc[-1]["close"]),
+            )
+    except Exception as exc:
+        log.error("Data API unreachable: %s", exc)
+        ok = False
+
+    if ok:
+        log.info("Connectivity check PASSED.")
+        return 0
+    log.error("Connectivity check FAILED.")
+    return 1
+
+
 def log_cycle(result: CycleResult) -> None:
     flag = "HALTED" if result.halted else "ok"
     log.info(
@@ -113,7 +159,20 @@ def log_cycle(result: CycleResult) -> None:
         )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Paper-only trading runner.")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="connectivity check only (read-only; reaches Alpaca, places no orders)",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="run a single trading cycle then exit (instead of looping)",
+    )
+    args = parser.parse_args(argv)
+
     setup_logging()
     settings = load_settings()
     try:
@@ -123,15 +182,28 @@ def main() -> int:
         return 1
     refuse_if_live(settings)
 
+    if args.check:
+        return connectivity_check(settings)
+
+    orchestrator = build_orchestrator(settings)
+    journal = Journal(settings.runtime.journal_db)
+
+    if args.once:
+        log.info("Running a single PAPER cycle | symbols=%s", ",".join(settings.symbols))
+        try:
+            result = orchestrator.run_cycle(datetime.now(UTC))
+            log_cycle(result)
+            journal.log_cycle(result)
+        finally:
+            journal.close()
+        return 0
+
     interval = max(settings.runtime.scan_interval_seconds, 5)
     log.info(
         "Starting PAPER trading | symbols=%s interval=%ds | LIVE DISABLED",
         ",".join(settings.symbols),
         interval,
     )
-
-    orchestrator = build_orchestrator(settings)
-    journal = Journal(settings.runtime.journal_db)
     last_day: datetime | None = None
     try:
         while True:
