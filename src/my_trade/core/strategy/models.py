@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
 from typing import TYPE_CHECKING
+
+from my_trade.core.models import OrderSide
 
 if TYPE_CHECKING:
     from my_trade.config import Settings
 
-
-class OrderSide(StrEnum):
-    BUY = "buy"
-    SELL = "sell"
+__all__ = [
+    "BarSnapshot",
+    "OrderSide",
+    "ScanEvaluation",
+    "Signal",
+    "StrategyParams",
+]
 
 
 @dataclass(frozen=True)
