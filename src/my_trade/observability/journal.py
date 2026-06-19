@@ -8,6 +8,7 @@ ORM, no migrations, no Slack — just an append-only audit trail.
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -48,6 +49,25 @@ class Journal:
         if self._path.parent and not self._path.parent.exists():
             self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path))
+        self._ensure_schema()
+
+    _EXPECTED_COLUMNS = frozenset({"id", "ts", "kind", "symbol", "detail", "equity", "day_pnl"})
+
+    def _ensure_schema(self) -> None:
+        """Create the events table, migrating any incompatible legacy table aside.
+
+        A pre-existing ``events`` table from an older/prototype schema would make
+        inserts fail; rather than crash, rename it to a timestamped backup
+        (non-destructive) and create the current schema.
+        """
+        exists = self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='events'"
+        ).fetchone()
+        if exists is not None:
+            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(events)")}
+            if not self._EXPECTED_COLUMNS.issubset(columns):
+                backup = f"events_legacy_{int(time.time())}"
+                self._conn.execute(f"ALTER TABLE events RENAME TO {backup}")
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS events (
@@ -86,6 +106,22 @@ class Journal:
             "daily_rollover", detail=f"new trading day {trading_day}", equity=equity, ts=ts
         )
 
+    def record_heartbeat(
+        self,
+        equity: float,
+        day_pnl: float,
+        open_positions: int,
+        ts: datetime | None = None,
+    ) -> None:
+        """A lightweight per-cycle pulse so the dashboard always has fresh equity."""
+        self.record_event(
+            "heartbeat",
+            detail=f"open_positions={open_positions}",
+            equity=equity,
+            day_pnl=day_pnl,
+            ts=ts,
+        )
+
     def log_cycle(self, result: CycleResult) -> int:
         """Persist material actions from a cycle; returns the number written."""
         written = 0
@@ -107,12 +143,29 @@ class Journal:
         rows = self._conn.execute(
             "SELECT ts, kind, symbol, detail, equity, day_pnl FROM events ORDER BY id"
         ).fetchall()
-        return [
-            JournalEvent(
-                ts=r[0], kind=r[1], symbol=r[2], detail=r[3], equity=r[4], day_pnl=r[5]
-            )
-            for r in rows
-        ]
+        return [self._row(r) for r in rows]
+
+    def fetch_recent(self, limit: int = 100) -> list[JournalEvent]:
+        """Return the most recent events, newest first."""
+        rows = self._conn.execute(
+            "SELECT ts, kind, symbol, detail, equity, day_pnl FROM events "
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._row(r) for r in rows]
+
+    def latest_equity(self) -> tuple[float, float] | None:
+        """Most recent (equity, day_pnl) from any event that recorded equity."""
+        row = self._conn.execute(
+            "SELECT equity, day_pnl FROM events WHERE equity IS NOT NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        return float(row[0]), float(row[1]) if row[1] is not None else 0.0
+
+    @staticmethod
+    def _row(r: tuple[str, str, str, str, float | None, float | None]) -> JournalEvent:
+        return JournalEvent(ts=r[0], kind=r[1], symbol=r[2], detail=r[3], equity=r[4], day_pnl=r[5])
 
     def close(self) -> None:
         self._conn.close()

@@ -48,6 +48,7 @@ from my_trade.data.alpaca_data import AlpacaDataProvider  # noqa: E402
 from my_trade.observability import Journal  # noqa: E402
 
 ALLOW_LIVE = False  # HARD GUARD — never flip this on in the paper runner.
+HEARTBEAT_EVERY_N_CYCLES = 10  # journal an equity pulse this often in the loop
 
 log = logging.getLogger("my_trade.paper")
 
@@ -314,6 +315,7 @@ def run_once(settings: Settings) -> int:
         return 1
 
     journaled = journal.log_cycle(result)
+    journal.record_heartbeat(result.equity, result.day_pnl, result.open_positions)
     journal.close()
     print_cycle_summary(settings, result, journaled, data, account, execution)
     return 1 if any(a.kind is ActionKind.ERROR for a in result.actions) else 0
@@ -351,6 +353,7 @@ def run_loop(settings: Settings) -> int:
         interval,
     )
     last_day: datetime | None = None
+    cycle_count = 0
     try:
         while True:
             now = datetime.now(UTC)
@@ -370,6 +373,11 @@ def run_loop(settings: Settings) -> int:
 
             log_cycle(result)
             journal.log_cycle(result)
+            if cycle_count % HEARTBEAT_EVERY_N_CYCLES == 0:
+                journal.record_heartbeat(
+                    result.equity, result.day_pnl, result.open_positions, ts=result.timestamp
+                )
+            cycle_count += 1
             time.sleep(interval)
     except KeyboardInterrupt:
         log.info("Shutdown requested; exiting cleanly (open positions left intact).")

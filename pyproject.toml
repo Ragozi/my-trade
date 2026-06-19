@@ -31,6 +31,9 @@ dev = [
     "mypy>=1.11",
     "poethepoet>=0.27",   # task runner: `poe test`, `poe lint`, `poe typecheck`
 ]
+dashboard = [
+    "streamlit>=1.30",    # local monitoring dashboard (poe dashboard)
+]
 
 # Console entry point (the CLI is implemented in Phase 1; safe to declare now).
 # [project.scripts]
@@ -55,6 +58,7 @@ where = ["src"]
 test = "pytest"
 "test:cov" = "pytest --cov=my_trade --cov-report=term-missing"
 paper = "python -m scripts.paper_trade"
+dashboard = "streamlit run scripts/dashboard.py"
 lint = "ruff check ."
 fmt = { shell = "ruff check --fix . && ruff format ." }
 typecheck = "mypy"

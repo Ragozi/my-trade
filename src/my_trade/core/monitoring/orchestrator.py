@@ -254,11 +254,20 @@ class TradingOrchestrator:
             if outcome.submitted:
                 self._persist(record_entry(self._state, symbol, signal.stop_price, when))
                 self._log.info(
-                    "ENTRY %s @ %.2f stop %.2f", symbol, signal.entry_price, signal.stop_price
+                    "ENTRY %s @ %.2f stop %.2f tp %.2f conf %.2f",
+                    symbol,
+                    signal.entry_price,
+                    signal.stop_price,
+                    signal.take_profit_price,
+                    signal.confidence,
+                )
+                detail = (
+                    f"entry={signal.entry_price:.2f} stop={signal.stop_price:.2f} "
+                    f"tp={signal.take_profit_price:.2f} conf={signal.confidence:.2f}"
                 )
                 actions.append(
                     CycleAction(
-                        ActionKind.ENTRY_SUBMITTED, symbol, status=outcome.status.value
+                        ActionKind.ENTRY_SUBMITTED, symbol, detail, outcome.status.value
                     )
                 )
             else:

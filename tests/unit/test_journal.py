@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -68,3 +69,55 @@ class TestJournal:
             events = journal.fetch_all()
         assert events[0].kind == "daily_rollover"
         assert "2026-06-18" in events[0].detail
+
+    def test_record_heartbeat_and_latest_equity(self, tmp_path: Path) -> None:
+        with Journal(tmp_path / "j.db") as journal:
+            journal.record_heartbeat(11_900.0, -100.0, open_positions=1, ts=NOW)
+            latest = journal.latest_equity()
+            events = journal.fetch_all()
+        assert latest == (11_900.0, -100.0)
+        assert events[0].kind == "heartbeat"
+        assert events[0].detail == "open_positions=1"
+
+    def test_latest_equity_none_when_empty(self, tmp_path: Path) -> None:
+        with Journal(tmp_path / "j.db") as journal:
+            assert journal.latest_equity() is None
+
+    def test_latest_equity_ignores_events_without_equity(self, tmp_path: Path) -> None:
+        with Journal(tmp_path / "j.db") as journal:
+            journal.record_heartbeat(12_000.0, 0.0, open_positions=0, ts=NOW)
+            journal.record_event("no_signal", symbol="BTC/USD")  # no equity
+            latest = journal.latest_equity()
+        assert latest == (12_000.0, 0.0)
+
+    def test_migrates_incompatible_legacy_table(self, tmp_path: Path) -> None:
+        path = tmp_path / "legacy.db"
+        # Simulate an old prototype schema with a different `events` table.
+        conn = sqlite3.connect(str(path))
+        conn.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, message TEXT)")
+        conn.execute("INSERT INTO events (message) VALUES ('old')")
+        conn.commit()
+        conn.close()
+
+        with Journal(path) as journal:  # must not raise; migrates old table aside
+            journal.record_event("entry_submitted", symbol="BTC/USD", equity=12_000.0)
+            events = journal.fetch_all()
+        assert len(events) == 1
+        assert events[0].kind == "entry_submitted"
+
+        # Legacy data preserved in a backup table.
+        conn = sqlite3.connect(str(path))
+        legacy = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'events_legacy_%'"
+        ).fetchall()
+        conn.close()
+        assert len(legacy) == 1
+
+    def test_fetch_recent_is_newest_first_and_limited(self, tmp_path: Path) -> None:
+        with Journal(tmp_path / "j.db") as journal:
+            for i in range(5):
+                journal.record_event("halt", detail=f"h{i}")
+            recent = journal.fetch_recent(limit=3)
+        assert len(recent) == 3
+        assert recent[0].detail == "h4"  # newest first
+        assert recent[-1].detail == "h2"
