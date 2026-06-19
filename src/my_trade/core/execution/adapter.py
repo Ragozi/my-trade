@@ -57,6 +57,8 @@ class ExecutionAdapter:
         mode: ExecutionMode = ExecutionMode.PAPER,
         allow_live: bool = False,
         max_submit_attempts: int = 3,
+        whole_shares: bool = False,
+        default_time_in_force: TimeInForce = TimeInForce.GTC,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
@@ -68,6 +70,8 @@ class ExecutionAdapter:
         self._limits = limits
         self._mode = mode
         self._attempts = max_submit_attempts
+        self._whole_shares = whole_shares
+        self._default_tif = default_time_in_force
         self._sleep = sleep
         self._clock = clock
 
@@ -81,10 +85,11 @@ class ExecutionAdapter:
         account: AccountState,
         *,
         now: datetime | None = None,
-        time_in_force: TimeInForce = TimeInForce.GTC,
+        time_in_force: TimeInForce | None = None,
     ) -> ExecutionOutcome:
         """Run the full safe path for a proposed long entry."""
         when = now or self._clock()
+        tif = time_in_force or self._default_tif
         client_order_id = make_client_order_id(intent.symbol, OrderIntent.ENTRY, when)
 
         # (2) Idempotency / reconciliation: don't resubmit an existing order.
@@ -117,13 +122,27 @@ class ExecutionAdapter:
                 detail=f"risk rejected: {decision.reason.value}",
             )
 
+        # Equities can't bracket fractional shares: floor to whole shares and
+        # reject (fail-closed) when the risk-sized quantity rounds to zero.
+        qty = decision.sizing.qty
+        if self._whole_shares:
+            qty = float(int(qty))
+            if qty < 1:
+                return ExecutionOutcome(
+                    status=ExecutionStatus.INVALID,
+                    client_order_id=client_order_id,
+                    submitted=False,
+                    risk_decision=decision,
+                    detail="risk-sized quantity rounds to 0 whole shares",
+                )
+
         # (4) Plan a validated bracket order.
         try:
             request = build_order_request(
                 intent,
-                decision.sizing.qty,
+                qty,
                 client_order_id,
-                time_in_force=time_in_force,
+                time_in_force=tif,
             )
         except ValueError as exc:
             return ExecutionOutcome(

@@ -105,6 +105,7 @@ class TradingOrchestrator:
         max_entries_per_symbol_per_day: int = 10,
         fallback_stop_pct: float = 0.0065,
         watchlist: Callable[[], Sequence[str]] | None = None,
+        session_is_open: Callable[[datetime], bool] | None = None,
         clock: Callable[[], datetime] = _utcnow,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -116,6 +117,7 @@ class TradingOrchestrator:
         self._limits = limits
         self._symbols = tuple(symbols)
         self._watchlist = watchlist
+        self._session_is_open = session_is_open
         self._entry_tf = entry_timeframe
         self._trend_tf = trend_timeframe
         self._trend_tf_15m = trend_timeframe_15m
@@ -200,7 +202,21 @@ class TradingOrchestrator:
                 actions=tuple(actions),
             )
 
-        # (3) Entries.
+        # (3) Session gate — never open NEW entries while the market is closed
+        # (exits above still run; bracket legs remain live at the broker).
+        if self._session_is_open is not None and not self._session_is_open(when):
+            self._log.info("market closed; skipping new entries this cycle")
+            actions.append(CycleAction(ActionKind.SESSION_CLOSED))
+            return CycleResult(
+                timestamp=when,
+                equity=account_state.equity,
+                day_pnl=day_pnl,
+                peak_equity=account_state.peak_equity,
+                open_positions=account_state.open_positions,
+                actions=tuple(actions),
+            )
+
+        # (4) Entries.
         open_symbols = {normalize_symbol(p.symbol) for p in snapshot.positions}
         actions.extend(self._scan_entries(open_symbols, account_state, when))
 

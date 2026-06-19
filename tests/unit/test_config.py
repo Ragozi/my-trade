@@ -140,3 +140,44 @@ class TestLoadSettings:
         env = {"APCA_API_KEY_ID": "key", "APCA_API_SECRET_KEY": "secret"}
         s = load_settings(env=env)
         s.validate_for_trading()  # should not raise
+
+
+class TestAssetClass:
+    def test_defaults_to_crypto(self) -> None:
+        s = load_settings(env={})
+        assert s.asset_class == "crypto"
+        assert s.is_equities is False
+        assert s.symbols == (DEFAULT_CRYPTO_SYMBOL,)
+
+    def test_equities_uses_equity_symbol_defaults(self) -> None:
+        s = load_settings(env={"ASSET_CLASS": "equities"})
+        assert s.is_equities is True
+        assert s.crypto_mode is False
+        assert "AAPL" in s.symbols
+
+    def test_equities_reads_equity_symbols(self) -> None:
+        s = load_settings(env={"ASSET_CLASS": "EQUITIES", "EQUITY_SYMBOLS": "spy, qqq"})
+        assert s.asset_class == "equities"
+        assert s.symbols == ("SPY", "QQQ")
+
+    def test_equities_empty_symbols_fall_back(self) -> None:
+        s = load_settings(env={"ASSET_CLASS": "equities", "EQUITY_SYMBOLS": " , "})
+        assert "AAPL" in s.symbols
+
+    def test_invalid_asset_class_fails_fast(self) -> None:
+        with pytest.raises(ValueError):
+            load_settings(env={"ASSET_CLASS": "forex"})
+
+    def test_screener_movers_settings_loaded(self) -> None:
+        env = {
+            "USE_SCREENER": "true",
+            "SCREENER_USE_MOVERS": "true",
+            "SCREENER_MOVERS_SOURCE": "gainers",
+            "SCREENER_MOVERS_TOP": "15",
+            "SCREENER_MOVERS_MIN_VOLUME": "100000",
+        }
+        s = load_settings(env=env)
+        assert s.screener.use_movers is True
+        assert s.screener.movers_source == "gainers"
+        assert s.screener.movers_top == 15
+        assert s.screener.movers_min_volume == pytest.approx(100000.0)

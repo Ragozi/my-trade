@@ -352,6 +352,51 @@ class TestExecuteEntry:
 
 
 # --------------------------------------------------------------------------- #
+# Equities support: whole-share rounding + default time-in-force
+# --------------------------------------------------------------------------- #
+class TestEquitiesExecution:
+    def _equity_intent(self) -> EntryIntent:
+        # entry 100, stop 99 => $1 risk/share; $240 budget => 240 whole shares.
+        return intent(
+            symbol="AAPL", entry_price=100.0, stop_price=99.0, take_profit_price=103.0
+        )
+
+    def test_whole_shares_floors_quantity(self) -> None:
+        broker = FakeBroker()
+        adapter = make_adapter(broker, whole_shares=True)
+        outcome = adapter.execute_entry(self._equity_intent(), account(), now=NOW)
+        assert outcome.status is ExecutionStatus.SUBMITTED
+        assert broker.submitted[0].qty == 240.0  # floored to whole shares
+
+    def test_whole_shares_rounding_to_zero_is_invalid(self) -> None:
+        # $240 risk budget / $650 stop distance => 0.369 shares -> floors to 0.
+        broker = FakeBroker()
+        adapter = make_adapter(broker, whole_shares=True)
+        outcome = adapter.execute_entry(intent(), account(), now=NOW)
+        assert outcome.status is ExecutionStatus.INVALID
+        assert broker.submit_calls == 0
+
+    def test_default_time_in_force_applied(self) -> None:
+        from my_trade.core.execution import TimeInForce
+
+        broker = FakeBroker()
+        adapter = make_adapter(
+            broker, whole_shares=True, default_time_in_force=TimeInForce.DAY
+        )
+        adapter.execute_entry(self._equity_intent(), account(), now=NOW)
+        assert broker.submitted[0].time_in_force is TimeInForce.DAY
+
+    def test_crypto_keeps_fractional_and_gtc(self) -> None:
+        from my_trade.core.execution import TimeInForce
+
+        broker = FakeBroker()
+        outcome = make_adapter(broker).execute_entry(intent(), account(), now=NOW)
+        assert outcome.status is ExecutionStatus.SUBMITTED
+        assert broker.submitted[0].qty == pytest.approx(240.0 / 650.0)
+        assert broker.submitted[0].time_in_force is TimeInForce.GTC
+
+
+# --------------------------------------------------------------------------- #
 # Misc model behavior
 # --------------------------------------------------------------------------- #
 class TestModels:

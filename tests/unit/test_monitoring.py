@@ -468,6 +468,53 @@ class TestOrchestrator:
         assert any(a.kind is ActionKind.ERROR for a in result.actions)
         assert executor.entries == []
 
+    def test_session_closed_skips_entries(self, tmp_path: Path) -> None:
+        executor = FakeExecutor()
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=FakeStrategy(entry=signal()),
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot()),  # type: ignore[arg-type]
+            store=DailyStateStore(tmp_path / "s.json"),
+            limits=limits(),
+            symbols=(SYMBOL,),
+            session_is_open=lambda _when: False,
+            clock=lambda: NOW,
+        )
+        result = orch.run_cycle(NOW)
+        assert result.halted is False
+        assert any(a.kind is ActionKind.SESSION_CLOSED for a in result.actions)
+        assert executor.entries == []
+
+    def test_session_closed_still_manages_exits(self, tmp_path: Path) -> None:
+        store = DailyStateStore(tmp_path / "daily_state.json")
+        store.save(
+            record_entry(
+                DailyState(
+                    trading_day=TODAY, start_of_day_equity=12_000.0, peak_equity=12_000.0
+                ),
+                SYMBOL,
+                99_350.0,
+                NOW,
+            )
+        )
+        executor = FakeExecutor()
+        pos = (Position(SYMBOL, qty=0.5, avg_entry_price=100_000.0),)
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=FakeStrategy(exit_reason="time_stop"),
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot(positions=pos)),  # type: ignore[arg-type]
+            store=store,
+            limits=limits(),
+            symbols=(SYMBOL,),
+            session_is_open=lambda _when: False,
+            clock=lambda: NOW,
+        )
+        result = orch.run_cycle(NOW)
+        assert executor.closes == [SYMBOL]  # exits run even when market closed
+        assert any(a.kind is ActionKind.SESSION_CLOSED for a in result.actions)
+
     def test_real_execution_adapter_enforces_risk_gate(self, tmp_path: Path) -> None:
         # An open position in another symbol pushes open_positions to the max,
         # so the REAL risk engine (inside ExecutionAdapter) must reject the BTC

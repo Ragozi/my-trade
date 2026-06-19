@@ -23,6 +23,10 @@ from my_trade.core.screening import (
 from .parsing import env_bool, env_float, env_int, env_str, parse_symbols
 
 DEFAULT_CRYPTO_SYMBOL = "BTC/USD"
+DEFAULT_EQUITY_SYMBOLS = "AAPL,MSFT,TSLA,NVDA,AMD"
+ASSET_CLASS_CRYPTO = "crypto"
+ASSET_CLASS_EQUITIES = "equities"
+VALID_ASSET_CLASSES = (ASSET_CLASS_CRYPTO, ASSET_CLASS_EQUITIES)
 
 
 @dataclass(frozen=True)
@@ -126,6 +130,11 @@ class ScreenerSettings:
     top_n: int = 5
     weight_volatility: float = 1.0
     weight_liquidity: float = 1.0
+    # Dynamic equities universe (Alpaca screener); ignored for crypto.
+    use_movers: bool = False
+    movers_source: str = "actives"  # actives | gainers | losers | both
+    movers_top: int = 20
+    movers_min_volume: float = 0.0
 
     def to_criteria(self) -> ScreenerCriteria:
         """Project into the screener's ``ScreenerCriteria`` contract."""
@@ -167,12 +176,21 @@ class Settings:
     strategy: StrategySettings
     runtime: RuntimeSettings
     screener: ScreenerSettings = ScreenerSettings()
+    asset_class: str = ASSET_CLASS_CRYPTO
     crypto_mode: bool = True
     symbols: tuple[str, ...] = (DEFAULT_CRYPTO_SYMBOL,)
+
+    @property
+    def is_equities(self) -> bool:
+        return self.asset_class == ASSET_CLASS_EQUITIES
 
     def validate(self) -> None:
         """Always-on structural validation (safe even outside trading)."""
         self.risk.validate()
+        if self.asset_class not in VALID_ASSET_CLASSES:
+            raise ValueError(
+                f"ASSET_CLASS must be one of {VALID_ASSET_CLASSES}, got {self.asset_class!r}"
+            )
         if not self.symbols:
             raise ValueError("at least one symbol is required")
 
@@ -253,6 +271,10 @@ def _load_screener(env: Mapping[str, str]) -> ScreenerSettings:
         top_n=env_int(env, "SCREENER_TOP_N", 5),
         weight_volatility=env_float(env, "SCREENER_WEIGHT_VOLATILITY", 1.0),
         weight_liquidity=env_float(env, "SCREENER_WEIGHT_LIQUIDITY", 1.0),
+        use_movers=env_bool(env, "SCREENER_USE_MOVERS", False),
+        movers_source=env_str(env, "SCREENER_MOVERS_SOURCE", "actives"),
+        movers_top=env_int(env, "SCREENER_MOVERS_TOP", 20),
+        movers_min_volume=env_float(env, "SCREENER_MOVERS_MIN_VOLUME", 0.0),
     )
 
 
@@ -286,9 +308,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             pass
         env = os.environ
 
-    symbols = tuple(parse_symbols(env_str(env, "CRYPTO_SYMBOLS", DEFAULT_CRYPTO_SYMBOL)))
+    asset_class = env_str(env, "ASSET_CLASS", ASSET_CLASS_CRYPTO).strip().lower()
+    if asset_class == ASSET_CLASS_EQUITIES:
+        symbols = tuple(parse_symbols(env_str(env, "EQUITY_SYMBOLS", DEFAULT_EQUITY_SYMBOLS)))
+        fallback = tuple(parse_symbols(DEFAULT_EQUITY_SYMBOLS))
+    else:
+        symbols = tuple(parse_symbols(env_str(env, "CRYPTO_SYMBOLS", DEFAULT_CRYPTO_SYMBOL)))
+        fallback = (DEFAULT_CRYPTO_SYMBOL,)
     if not symbols:
-        symbols = (DEFAULT_CRYPTO_SYMBOL,)
+        symbols = fallback
 
     settings = Settings(
         alpaca=_load_alpaca(env),
@@ -296,7 +324,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         strategy=_load_strategy(env),
         runtime=_load_runtime(env),
         screener=_load_screener(env),
-        crypto_mode=env_bool(env, "CRYPTO_MODE", True),
+        asset_class=asset_class,
+        crypto_mode=env_bool(env, "CRYPTO_MODE", asset_class == ASSET_CLASS_CRYPTO),
         symbols=symbols,
     )
     settings.validate()

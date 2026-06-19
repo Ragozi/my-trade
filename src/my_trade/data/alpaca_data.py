@@ -64,6 +64,47 @@ def records_from_bars(bars: Iterable[Any]) -> list[dict[str, object]]:
     return records
 
 
+def alpaca_timeframe(timeframe: str) -> Any:
+    """Map our timeframe string to an Alpaca ``TimeFrame`` (shared crypto/equity).
+
+    Raises ``ValueError`` for an unsupported timeframe.
+    """
+    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
+    mapping = {
+        "1Min": TimeFrame(1, TimeFrameUnit.Minute),
+        "2Min": TimeFrame(2, TimeFrameUnit.Minute),
+        "5Min": TimeFrame(5, TimeFrameUnit.Minute),
+        "15Min": TimeFrame(15, TimeFrameUnit.Minute),
+        "30Min": TimeFrame(30, TimeFrameUnit.Minute),
+        "1Hour": TimeFrame(1, TimeFrameUnit.Hour),
+        "1Day": TimeFrame(1, TimeFrameUnit.Day),
+    }
+    if timeframe not in mapping:
+        raise ValueError(f"unsupported timeframe {timeframe!r}")
+    return mapping[timeframe]
+
+
+def frame_from_barset(barset: Any, symbol: str, *, fill_zero_volume: bool = True) -> pd.DataFrame:
+    """Extract a cleaned OHLCV frame for ``symbol`` from an Alpaca barset.
+
+    Pure given a duck-typed ``barset`` (an object with a ``.data`` mapping of
+    symbol -> bar list), so it is unit-testable without the network. Returns an
+    empty frame when the symbol is absent/empty. ``fill_zero_volume`` is the
+    crypto-only quirk fix (current candle reports volume==0); equities pass
+    ``False``.
+    """
+    data = getattr(barset, "data", {}) or {}
+    key: str | None = symbol if symbol in data else None
+    if key is None:
+        key = next((k for k in data if symbols_match(k, symbol)), None)
+    if key is None or not data.get(key):
+        return empty_frame()
+    frame = bars_to_frame(records_from_bars(data[key]))
+    frame = clean_bars(frame)
+    return forward_fill_zero_volume(frame) if fill_zero_volume else frame
+
+
 class AlpacaDataProvider:
     """Crypto OHLCV bars from Alpaca, cleaned via the pure data layer."""
 
@@ -90,20 +131,7 @@ class AlpacaDataProvider:
         )
 
     def _timeframe(self, timeframe: str) -> Any:
-        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-
-        mapping = {
-            "1Min": TimeFrame(1, TimeFrameUnit.Minute),
-            "2Min": TimeFrame(2, TimeFrameUnit.Minute),
-            "5Min": TimeFrame(5, TimeFrameUnit.Minute),
-            "15Min": TimeFrame(15, TimeFrameUnit.Minute),
-            "30Min": TimeFrame(30, TimeFrameUnit.Minute),
-            "1Hour": TimeFrame(1, TimeFrameUnit.Hour),
-            "1Day": TimeFrame(1, TimeFrameUnit.Day),
-        }
-        if timeframe not in mapping:
-            raise ValueError(f"unsupported timeframe {timeframe!r}")
-        return mapping[timeframe]
+        return alpaca_timeframe(timeframe)
 
     def get_bars(self, symbol: str, timeframe: str, limit: int | None = None) -> pd.DataFrame:
         bar_limit = limit or self._default_limit
@@ -124,16 +152,7 @@ class AlpacaDataProvider:
             _log.warning("get_bars failed for %s %s: %s", symbol, timeframe, exc)
             return empty_frame()
 
-        data = getattr(barset, "data", {}) or {}
-        key: str | None = symbol if symbol in data else None
-        if key is None:
-            key = next((k for k in data if symbols_match(k, symbol)), None)
-        if key is None or not data.get(key):
-            return empty_frame()
-
-        frame = bars_to_frame(records_from_bars(data[key]))
-        frame = clean_bars(frame)
-        return forward_fill_zero_volume(frame)
+        return frame_from_barset(barset, symbol, fill_zero_volume=True)
 
     def get_latest_price(self, symbol: str) -> float | None:
         frame = self.get_bars(symbol, "1Min", limit=5)

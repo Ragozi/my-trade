@@ -19,6 +19,7 @@ class ActionKind(StrEnum):
     NO_SIGNAL = "no_signal"
     SKIP_OPEN_POSITION = "skip_open_position"
     SKIP_MAX_ENTRIES = "skip_max_entries"
+    SESSION_CLOSED = "session_closed"
     HALT = "halt"
     ERROR = "error"
 

@@ -33,8 +33,10 @@ from my_trade.core.execution import (  # noqa: E402
     ExecutionAdapter,
     ExecutionMode,
     ExecutionOutcome,
+    TimeInForce,
 )
 from my_trade.core.execution.alpaca_client import AlpacaBrokerClient  # noqa: E402
+from my_trade.core.market_calendar import make_session_guard  # noqa: E402
 from my_trade.core.monitoring import (  # noqa: E402
     ActionKind,
     CycleResult,
@@ -46,9 +48,13 @@ from my_trade.core.risk import AccountState, RiskLimits  # noqa: E402
 from my_trade.core.screening import (  # noqa: E402
     Screener,
     StaticUniverseSource,
+    UniverseSource,
 )
 from my_trade.core.strategy import PullbackStrategy, StrategyParams  # noqa: E402
+from my_trade.data import MarketDataProvider  # noqa: E402
 from my_trade.data.alpaca_data import AlpacaDataProvider  # noqa: E402
+from my_trade.data.alpaca_movers import AlpacaMoversUniverse  # noqa: E402
+from my_trade.data.stock_data import StockHistoricalDataProvider  # noqa: E402
 from my_trade.observability import Journal  # noqa: E402
 
 ALLOW_LIVE = False  # HARD GUARD — never flip this on in the paper runner.
@@ -80,16 +86,23 @@ def refuse_if_live(settings: Settings) -> None:
 
 @dataclass
 class Providers:
-    """The three live Alpaca I/O boundaries."""
+    """The three live Alpaca I/O boundaries (data provider depends on asset class)."""
 
-    data: AlpacaDataProvider
+    data: MarketDataProvider
     account: AlpacaAccountProvider
     broker: AlpacaBrokerClient
 
 
+def make_data_provider(settings: Settings) -> MarketDataProvider:
+    """Crypto vs equities bars provider, selected by ASSET_CLASS."""
+    if settings.is_equities:
+        return StockHistoricalDataProvider.from_settings(settings)
+    return AlpacaDataProvider.from_settings(settings)
+
+
 def build_providers(settings: Settings) -> Providers:
     return Providers(
-        data=AlpacaDataProvider.from_settings(settings),
+        data=make_data_provider(settings),
         account=AlpacaAccountProvider(
             settings.alpaca.api_key,
             settings.alpaca.api_secret,
@@ -104,11 +117,15 @@ def build_providers(settings: Settings) -> Providers:
 
 
 def build_execution(settings: Settings, broker: AlpacaBrokerClient) -> ExecutionAdapter:
+    # Equities can't bracket fractional shares and use DAY orders; crypto is
+    # fractional + GTC. The hard ALLOW_LIVE guard applies to both.
     return ExecutionAdapter(
         broker,
         settings.risk.to_limits(),
         mode=ExecutionMode.PAPER,
         allow_live=ALLOW_LIVE,
+        whole_shares=settings.is_equities,
+        default_time_in_force=TimeInForce.DAY if settings.is_equities else TimeInForce.GTC,
     )
 
 
@@ -121,9 +138,25 @@ def build_screener(settings: Settings, data: object) -> Screener | None:
     sc = settings.screener
     if not sc.enabled:
         return None
+
+    universe: UniverseSource
+    if settings.is_equities and sc.use_movers:
+        universe = AlpacaMoversUniverse(
+            settings.alpaca.api_key,
+            settings.alpaca.api_secret,
+            source=sc.movers_source,
+            top=sc.movers_top,
+            min_volume=sc.movers_min_volume,
+        )
+        source_desc = f"alpaca-movers({sc.movers_source}, top={sc.movers_top})"
+    else:
+        static_symbols = settings.symbols if settings.is_equities else sc.universe
+        universe = StaticUniverseSource(static_symbols)
+        source_desc = f"static({len(tuple(static_symbols))} symbols)"
+
     screener = Screener(
         data=data,  # type: ignore[arg-type]
-        universe=StaticUniverseSource(sc.universe),
+        universe=universe,
         criteria=sc.to_criteria(),
         timeframe=sc.timeframe,
         bar_limit=sc.bar_limit,
@@ -132,8 +165,9 @@ def build_screener(settings: Settings, data: object) -> Screener | None:
         refresh_seconds=sc.refresh_seconds,
     )
     log.info(
-        "Screener ENABLED | universe=%d symbols top_n=%d refresh=%ds tf=%s",
-        len(sc.universe),
+        "Screener ENABLED | %s universe=%s top_n=%d refresh=%ds tf=%s",
+        settings.asset_class,
+        source_desc,
         sc.top_n,
         sc.refresh_seconds,
         sc.timeframe,
@@ -165,6 +199,7 @@ def build_orchestrator(
         max_entries_per_symbol_per_day=settings.risk.max_entries_per_symbol_per_day,
         fallback_stop_pct=settings.strategy.stop_loss_pct,
         watchlist=screener.select if screener is not None else None,
+        session_is_open=make_session_guard(settings.asset_class),
     )
 
 
@@ -173,7 +208,7 @@ def build_orchestrator(
 # so the smoke-test summary can report exactly which boundaries were exercised.
 # --------------------------------------------------------------------------- #
 class _CountingData:
-    def __init__(self, inner: AlpacaDataProvider) -> None:
+    def __init__(self, inner: MarketDataProvider) -> None:
         self._inner = inner
         self.get_bars_calls = 0
 
@@ -328,7 +363,11 @@ def print_cycle_summary(
 
 
 def run_once(settings: Settings) -> int:
-    log.info("Smoke test: single PAPER cycle (--once) | symbols=%s", ",".join(settings.symbols))
+    log.info(
+        "Smoke test: single PAPER cycle (--once) | asset_class=%s symbols=%s",
+        settings.asset_class,
+        ",".join(settings.symbols),
+    )
     providers = build_providers(settings)
 
     if not run_health_checks(settings, providers):
@@ -396,7 +435,8 @@ def run_loop(settings: Settings) -> int:
 
     interval = max(settings.runtime.scan_interval_seconds, 5)
     log.info(
-        "Starting PAPER trading | symbols=%s interval=%ds | LIVE DISABLED",
+        "Starting PAPER trading | asset_class=%s symbols=%s interval=%ds | LIVE DISABLED",
+        settings.asset_class,
         ",".join(settings.symbols),
         interval,
     )
