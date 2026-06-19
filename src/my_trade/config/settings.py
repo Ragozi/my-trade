@@ -15,6 +15,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from my_trade.core.risk import RiskLimits
+from my_trade.core.screening import (
+    DEFAULT_CRYPTO_UNIVERSE,
+    ScreenerCriteria,
+)
 
 from .parsing import env_bool, env_float, env_int, env_str, parse_symbols
 
@@ -98,6 +102,47 @@ class StrategySettings:
 
 
 @dataclass(frozen=True)
+class ScreenerSettings:
+    """Deterministic universe-selection knobs (SCOPE.md screener policy).
+
+    Disabled by default: when ``enabled`` is False the orchestrator trades the
+    statically configured ``symbols`` exactly as before. When enabled, the
+    screener narrows ``universe`` down to the best ``top_n`` names each refresh.
+    """
+
+    enabled: bool = False
+    universe: tuple[str, ...] = DEFAULT_CRYPTO_UNIVERSE
+    timeframe: str = "15Min"
+    bar_limit: int = 50
+    atr_period: int = 14
+    lookback: int = 20
+    refresh_seconds: int = 900
+    min_price: float = 0.0
+    max_price: float = float("inf")
+    min_dollar_volume: float = 0.0
+    min_atr_pct: float = 0.0
+    max_atr_pct: float = 1.0
+    min_bars: int = 20
+    top_n: int = 5
+    weight_volatility: float = 1.0
+    weight_liquidity: float = 1.0
+
+    def to_criteria(self) -> ScreenerCriteria:
+        """Project into the screener's ``ScreenerCriteria`` contract."""
+        return ScreenerCriteria(
+            min_price=self.min_price,
+            max_price=self.max_price,
+            min_dollar_volume=self.min_dollar_volume,
+            min_atr_pct=self.min_atr_pct,
+            max_atr_pct=self.max_atr_pct,
+            min_bars=self.min_bars,
+            top_n=self.top_n,
+            weight_volatility=self.weight_volatility,
+            weight_liquidity=self.weight_liquidity,
+        )
+
+
+@dataclass(frozen=True)
 class RuntimeSettings:
     """Operational knobs: timeframes, cadence, logging, file paths."""
 
@@ -121,6 +166,7 @@ class Settings:
     risk: RiskSettings
     strategy: StrategySettings
     runtime: RuntimeSettings
+    screener: ScreenerSettings = ScreenerSettings()
     crypto_mode: bool = True
     symbols: tuple[str, ...] = (DEFAULT_CRYPTO_SYMBOL,)
 
@@ -187,6 +233,29 @@ def _load_strategy(env: Mapping[str, str]) -> StrategySettings:
     )
 
 
+def _load_screener(env: Mapping[str, str]) -> ScreenerSettings:
+    raw_universe = env_str(env, "SCREENER_UNIVERSE", "")
+    universe = tuple(parse_symbols(raw_universe)) if raw_universe else DEFAULT_CRYPTO_UNIVERSE
+    return ScreenerSettings(
+        enabled=env_bool(env, "USE_SCREENER", False),
+        universe=universe,
+        timeframe=env_str(env, "SCREENER_TIMEFRAME", "15Min"),
+        bar_limit=env_int(env, "SCREENER_BAR_LIMIT", 50),
+        atr_period=env_int(env, "SCREENER_ATR_PERIOD", 14),
+        lookback=env_int(env, "SCREENER_LOOKBACK", 20),
+        refresh_seconds=env_int(env, "SCREENER_REFRESH_SECONDS", 900),
+        min_price=env_float(env, "SCREENER_MIN_PRICE", 0.0),
+        max_price=env_float(env, "SCREENER_MAX_PRICE", float("inf")),
+        min_dollar_volume=env_float(env, "SCREENER_MIN_DOLLAR_VOLUME", 0.0),
+        min_atr_pct=env_float(env, "SCREENER_MIN_ATR_PCT", 0.0),
+        max_atr_pct=env_float(env, "SCREENER_MAX_ATR_PCT", 1.0),
+        min_bars=env_int(env, "SCREENER_MIN_BARS", 20),
+        top_n=env_int(env, "SCREENER_TOP_N", 5),
+        weight_volatility=env_float(env, "SCREENER_WEIGHT_VOLATILITY", 1.0),
+        weight_liquidity=env_float(env, "SCREENER_WEIGHT_LIQUIDITY", 1.0),
+    )
+
+
 def _load_runtime(env: Mapping[str, str]) -> RuntimeSettings:
     return RuntimeSettings(
         entry_timeframe=env_str(env, "ENTRY_TIMEFRAME", "1Min"),
@@ -226,6 +295,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         risk=_load_risk(env),
         strategy=_load_strategy(env),
         runtime=_load_runtime(env),
+        screener=_load_screener(env),
         crypto_mode=env_bool(env, "CRYPTO_MODE", True),
         symbols=symbols,
     )

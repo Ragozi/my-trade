@@ -43,6 +43,10 @@ from my_trade.core.monitoring import (  # noqa: E402
 )
 from my_trade.core.monitoring.alpaca_account import AlpacaAccountProvider  # noqa: E402
 from my_trade.core.risk import AccountState, RiskLimits  # noqa: E402
+from my_trade.core.screening import (  # noqa: E402
+    Screener,
+    StaticUniverseSource,
+)
 from my_trade.core.strategy import PullbackStrategy, StrategyParams  # noqa: E402
 from my_trade.data.alpaca_data import AlpacaDataProvider  # noqa: E402
 from my_trade.observability import Journal  # noqa: E402
@@ -108,12 +112,42 @@ def build_execution(settings: Settings, broker: AlpacaBrokerClient) -> Execution
     )
 
 
+def build_screener(settings: Settings, data: object) -> Screener | None:
+    """Optional deterministic universe selection (off unless USE_SCREENER=true).
+
+    Returns ``None`` when disabled, so the orchestrator falls back to the static
+    ``symbols`` list exactly as before.
+    """
+    sc = settings.screener
+    if not sc.enabled:
+        return None
+    screener = Screener(
+        data=data,  # type: ignore[arg-type]
+        universe=StaticUniverseSource(sc.universe),
+        criteria=sc.to_criteria(),
+        timeframe=sc.timeframe,
+        bar_limit=sc.bar_limit,
+        atr_period=sc.atr_period,
+        lookback=sc.lookback,
+        refresh_seconds=sc.refresh_seconds,
+    )
+    log.info(
+        "Screener ENABLED | universe=%d symbols top_n=%d refresh=%ds tf=%s",
+        len(sc.universe),
+        sc.top_n,
+        sc.refresh_seconds,
+        sc.timeframe,
+    )
+    return screener
+
+
 def build_orchestrator(
     settings: Settings,
     *,
     data: object,
     account: object,
     execution: object,
+    screener: Screener | None = None,
 ) -> TradingOrchestrator:
     strategy = PullbackStrategy(StrategyParams.from_settings(settings))
     return TradingOrchestrator(
@@ -130,6 +164,7 @@ def build_orchestrator(
         bar_limit=settings.runtime.bar_limit,
         max_entries_per_symbol_per_day=settings.risk.max_entries_per_symbol_per_day,
         fallback_stop_pct=settings.strategy.stop_loss_pct,
+        watchlist=screener.select if screener is not None else None,
     )
 
 
@@ -303,7 +338,10 @@ def run_once(settings: Settings) -> int:
     data = _CountingData(providers.data)
     account = _CountingAccount(providers.account)
     execution = _CountingExecution(build_execution(settings, providers.broker))
-    orchestrator = build_orchestrator(settings, data=data, account=account, execution=execution)
+    screener = build_screener(settings, data)
+    orchestrator = build_orchestrator(
+        settings, data=data, account=account, execution=execution, screener=screener
+    )
 
     journal = Journal(settings.runtime.journal_db)
     try:
@@ -317,6 +355,11 @@ def run_once(settings: Settings) -> int:
     journaled = journal.log_cycle(result)
     journal.record_heartbeat(result.equity, result.day_pnl, result.open_positions)
     journal.close()
+    if screener is not None:
+        watchlist = ", ".join(
+            f"{c.symbol}(atr={c.atr_pct:.2%},score={c.score:.3f})" for c in screener.ranked
+        )
+        log.info("Screener watchlist:  %s", watchlist or "(none passed filters)")
     print_cycle_summary(settings, result, journaled, data, account, execution)
     return 1 if any(a.kind is ActionKind.ERROR for a in result.actions) else 0
 
@@ -341,8 +384,13 @@ def log_cycle(result: CycleResult) -> None:
 def run_loop(settings: Settings) -> int:
     providers = build_providers(settings)
     execution = build_execution(settings, providers.broker)
+    screener = build_screener(settings, providers.data)
     orchestrator = build_orchestrator(
-        settings, data=providers.data, account=providers.account, execution=execution
+        settings,
+        data=providers.data,
+        account=providers.account,
+        execution=execution,
+        screener=screener,
     )
     journal = Journal(settings.runtime.journal_db)
 

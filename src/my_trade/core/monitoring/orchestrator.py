@@ -104,6 +104,7 @@ class TradingOrchestrator:
         bar_limit: int = 200,
         max_entries_per_symbol_per_day: int = 10,
         fallback_stop_pct: float = 0.0065,
+        watchlist: Callable[[], Sequence[str]] | None = None,
         clock: Callable[[], datetime] = _utcnow,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -114,6 +115,7 @@ class TradingOrchestrator:
         self._store = store
         self._limits = limits
         self._symbols = tuple(symbols)
+        self._watchlist = watchlist
         self._entry_tf = entry_timeframe
         self._trend_tf = trend_timeframe
         self._trend_tf_15m = trend_timeframe_15m
@@ -134,6 +136,25 @@ class TradingOrchestrator:
 
     def _get_bars(self, symbol: str, timeframe: str) -> pd.DataFrame:
         return self._data.get_bars(symbol, timeframe, self._bar_limit)
+
+    def _active_symbols(self) -> tuple[str, ...]:
+        """Symbols to scan this cycle.
+
+        When a dynamic ``watchlist`` (e.g. the screener) is configured we use it,
+        but fail safe to the statically configured symbols if it errors or is
+        empty — the screener narrowing the universe must never *halt* trading.
+        """
+        if self._watchlist is None:
+            return self._symbols
+        try:
+            selected = tuple(self._watchlist())
+        except Exception as exc:
+            self._log.warning("watchlist failed, using static symbols: %s", exc)
+            return self._symbols
+        if not selected:
+            self._log.debug("watchlist empty this cycle; nothing to scan")
+            return ()
+        return selected
 
     def run_cycle(self, now: datetime | None = None) -> CycleResult:
         when = now or self._clock()
@@ -228,7 +249,7 @@ class TradingOrchestrator:
         when: datetime,
     ) -> list[CycleAction]:
         actions: list[CycleAction] = []
-        for symbol in self._symbols:
+        for symbol in self._active_symbols():
             if normalize_symbol(symbol) in open_symbols:
                 actions.append(CycleAction(ActionKind.SKIP_OPEN_POSITION, symbol))
                 continue
