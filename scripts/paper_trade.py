@@ -27,6 +27,7 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from my_trade.api.bot_manager import record_cycle  # noqa: E402
 from my_trade.config import Settings, load_settings  # noqa: E402
 from my_trade.core.execution import (  # noqa: E402
     EntryIntent,
@@ -393,6 +394,12 @@ def run_once(settings: Settings) -> int:
 
     journaled = journal.log_cycle(result)
     journal.record_heartbeat(result.equity, result.day_pnl, result.open_positions)
+    record_cycle(
+        settings.runtime.log_dir,
+        timestamp=result.timestamp,
+        halted=result.halted,
+        halt_reason=result.halt_reason.value if result.halt_reason else None,
+    )
     journal.close()
     if screener is not None:
         watchlist = ", ".join(
@@ -465,6 +472,12 @@ def run_loop(settings: Settings) -> int:
                 journal.record_heartbeat(
                     result.equity, result.day_pnl, result.open_positions, ts=result.timestamp
                 )
+            record_cycle(
+                settings.runtime.log_dir,
+                timestamp=result.timestamp,
+                halted=result.halted,
+                halt_reason=result.halt_reason.value if result.halt_reason else None,
+            )
             cycle_count += 1
             time.sleep(interval)
     except KeyboardInterrupt:

@@ -1,0 +1,140 @@
+// Shared types for the My-Trade operator console.
+// Mirrors the backend REST contract documented in the project spec.
+
+export type AssetClass = "crypto" | "equities";
+export type BotStatus = "RUNNING" | "STOPPED" | "HALTED" | "ERROR";
+export type EventKind =
+  | "entry_submitted"
+  | "entry_rejected"
+  | "exit_submitted"
+  | "halt"
+  | "error"
+  | "heartbeat"
+  | "daily_rollover"
+  | string;
+
+export interface Health {
+  status: string;
+  bot_running: boolean;
+  asset_class: AssetClass;
+  paper_trading: boolean;
+}
+
+export interface Status {
+  bot: {
+    running: boolean;
+    pid: number | null;
+    started_at: string | null;
+    last_cycle_at: string | null;
+    cycles_today: number;
+  };
+  session: { open: boolean; asset_class: AssetClass };
+  halted: boolean;
+  halt_reason: string | null;
+}
+
+export interface Position {
+  symbol: string;
+  qty: number;
+  avg_entry_price: number;
+  market_value: number;
+  unrealized_pl: number;
+}
+
+export interface Account {
+  equity: number;
+  cash: number;
+  buying_power: number;
+  day_pnl: number;
+  peak_equity: number;
+  open_positions: number;
+  positions: Position[];
+}
+
+export interface Strategy {
+  rsi_oversold: number;
+  rsi_overbought: number;
+  stop_loss_pct: number;
+  take_profit_pct: number;
+  max_hold_minutes: number;
+  require_15m_uptrend: boolean;
+  require_volume_spike: boolean;
+}
+
+export interface RiskConfig {
+  max_risk_per_trade_pct: number;
+  max_open_risk_pct: number;
+  daily_loss_limit_pct: number;
+  max_drawdown_pct: number;
+  max_concurrent_positions: number;
+}
+
+export interface ScreenerConfig {
+  enabled: boolean;
+  top_n: number;
+  refresh_seconds: number;
+  min_atr_pct: number;
+  min_dollar_volume: number;
+  use_movers: boolean;
+  movers_source: "actives" | "gainers" | "losers" | "both";
+}
+
+export interface RuntimeConfig {
+  scan_interval_seconds: number;
+  log_level: "DEBUG" | "INFO" | "WARNING" | "ERROR";
+}
+
+export interface AppConfig {
+  asset_class: AssetClass;
+  symbols: string[];
+  paper_trading: boolean;
+  screener: ScreenerConfig;
+  strategy: Strategy;
+  risk: RiskConfig;
+  runtime: RuntimeConfig;
+}
+
+export interface ActivityEvent {
+  ts: string;
+  kind: EventKind;
+  symbol: string | null;
+  detail: string;
+  equity: number | null;
+  day_pnl: number | null;
+}
+
+export interface Stats {
+  today: { entries: number; exits: number; halts: number; errors: number };
+  daily_state: {
+    trading_day: string;
+    start_of_day_equity: number;
+    peak_equity: number;
+    entries_today: Record<string, number>;
+  };
+  latest_equity: { equity: number; day_pnl: number } | null;
+}
+
+export interface Watchlist {
+  symbols: string[];
+  ranked: { symbol: string; atr_pct: number; dollar_volume: number; score: number }[];
+  refreshed_at: string | null;
+  universe_source?: string;
+}
+
+export interface LogsResponse {
+  lines: string[];
+}
+
+export interface BotActionResult {
+  ok: boolean;
+  message?: string;
+  summary?: string;
+  actions?: unknown[];
+  checks?: { account: boolean; data: boolean; execution: boolean };
+}
+
+export interface SettingsPatchResult {
+  ok: boolean;
+  requires_restart: boolean;
+  message: string;
+}

@@ -1,0 +1,153 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 20% 4%;
+    --foreground: 240 10% 96%;
+
+    --card: 240 18% 7%;
+    --card-foreground: 240 10% 96%;
+
+    --popover: 240 18% 7%;
+    --popover-foreground: 240 10% 96%;
+
+    --primary: 217 100% 65%;
+    --primary-foreground: 240 10% 96%;
+
+    --secondary: 240 15% 12%;
+    --secondary-foreground: 240 10% 96%;
+
+    --muted: 240 15% 12%;
+    --muted-foreground: 245 15% 60%;
+
+    --accent: 152 100% 45%;
+    --accent-foreground: 240 20% 4%;
+
+    --destructive: 348 100% 63%;
+    --destructive-foreground: 240 10% 96%;
+
+    --border: 240 10% 12%;
+    --input: 240 10% 12%;
+    --ring: 217 100% 65%;
+
+    --radius: 0.75rem;
+
+    --success: 152 100% 45%;
+    --warning: 30 100% 63%;
+    --info: 217 100% 65%;
+    --accent-orange: 24 100% 63%;
+    --accent-purple: 260 100% 71%;
+    --accent-yellow: 42 100% 70%;
+
+    --bg-elevated: 240 16% 14%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Sora', sans-serif;
+    background:
+      radial-gradient(ellipse at 20% 50%, hsla(217, 100%, 65%, 0.04) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 20%, hsla(260, 100%, 71%, 0.04) 0%, transparent 60%),
+      hsl(240, 20%, 4%);
+    background-attachment: fixed;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Sora', sans-serif;
+  }
+
+  .font-data {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .card-gradient-blue {
+    background: linear-gradient(135deg, hsl(240, 18%, 7%) 0%, hsla(217, 100%, 65%, 0.06) 100%);
+  }
+
+  .card-gradient-green {
+    background: linear-gradient(135deg, hsl(240, 18%, 7%) 0%, hsla(152, 100%, 45%, 0.06) 100%);
+  }
+
+  .card-gradient-red {
+    background: linear-gradient(135deg, hsl(240, 18%, 7%) 0%, hsla(348, 100%, 63%, 0.06) 100%);
+  }
+
+  .card-gradient-purple {
+    background: linear-gradient(135deg, hsl(240, 18%, 7%) 0%, hsla(260, 100%, 71%, 0.06) 100%);
+  }
+
+  .card-gradient-orange {
+    background: linear-gradient(135deg, hsl(240, 18%, 7%) 0%, hsla(24, 100%, 63%, 0.06) 100%);
+  }
+
+  .glow-green {
+    box-shadow: -3px 0 12px -4px hsla(152, 100%, 45%, 0.4);
+  }
+
+  .glow-red {
+    box-shadow: -3px 0 12px -4px hsla(348, 100%, 63%, 0.4);
+  }
+
+  @keyframes count-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .animate-count-up {
+    animation: count-up 0.4s ease-out;
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(90deg, transparent 0%, hsla(217, 100%, 65%, 0.05) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 2s ease-in-out;
+  }
+
+  .animate-pulse-dot {
+    animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.5s ease-out both;
+  }
+
+  .animate-slide-up-1 { animation-delay: 0ms; }
+  .animate-slide-up-2 { animation-delay: 60ms; }
+  .animate-slide-up-3 { animation-delay: 120ms; }
+  .animate-slide-up-4 { animation-delay: 180ms; }
+
+  .hover-lift {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px -8px hsla(217, 100%, 65%, 0.15);
+  }
+}

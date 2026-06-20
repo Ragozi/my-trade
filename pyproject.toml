@@ -58,6 +58,7 @@ where = ["src"]
 test = "pytest"
 "test:cov" = "pytest --cov=my_trade --cov-report=term-missing"
 paper = "python -m scripts.paper_trade"
+api = "python -m scripts.api_server"
 dashboard = "streamlit run scripts/dashboard.py"
 lint = "ruff check ."
 fmt = { shell = "ruff check --fix . && ruff format ." }
@@ -90,7 +91,7 @@ show_missing = true
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = [".venv", "logs", "dashboard"]
+extend-exclude = [".venv", "logs", "dashboard", "frontend/node_modules", "frontend/dist"]
 
 [tool.ruff.lint]
 select = [
