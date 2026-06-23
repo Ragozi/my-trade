@@ -69,14 +69,16 @@ untrusted external input: schema-validated, bounded, and advisory.
 
 ## 4. Current State (honest assessment)
 
-- A working **BTC/USD scalper prototype** exists (flat modules: `strategy.py`,
-  `risk.py`, `broker.py`, `main.py`, `backtester.py`, `dashboard/`).
-- **No git commits, no automated tests, no CI** yet.
-- No Claude integration yet (correct — that comes last).
-
-➡️ The prototype is treated as a **reference implementation** to be hardened and
-migrated into the package layout (see `ARCHITECTURE.md`), *with tests added first*.
-We do **not** big-bang rewrite working code without a test harness around it.
+- **Deterministic core (Phases 1–3)** is implemented in `src/my_trade/`: risk, strategy,
+  execution, monitoring orchestrator, screener, journal, paper runner, operator UI.
+- **Phase 4 research layer** is implemented in `src/my_trade/research/` (Claude client,
+  advisor, memory/reflection, evaluation, portfolio-aware prompts). Advisory-only by
+  default (`CLAUDE_REQUIRE_APPROVAL=false`).
+- **Activation:** set `ASSET_CLASS=equities`, `ENABLE_CLAUDE=true`, and a valid
+  `ANTHROPIC_API_KEY`. See `docs/PHASE4_ACTIVATION.md`.
+- Legacy flat modules (`strategy.py`, `main.py` at repo root) remain as reference;
+  the paper loop runs via `scripts/paper_trade.py`.
+- Claude **never** calls Alpaca; orders flow only through the deterministic execution adapter.
 
 ---
 

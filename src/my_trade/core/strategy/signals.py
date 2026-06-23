@@ -57,14 +57,16 @@ def check_rsi(
 def check_macd(
     hist: float | None, hist_prev: float | None, params: StrategyParams
 ) -> ConditionResult:
-    del params  # no params needed; kept for a uniform signature
+    if not params.require_macd_positive and not params.require_macd_expanding:
+        return ConditionResult(True, "MACD filter off")
     if hist is None:
         return ConditionResult(False, "MACD unavailable")
-    if hist <= 0:
+    if params.require_macd_positive and hist <= 0:
         return ConditionResult(False, f"MACD hist {hist:.6f} <= 0")
-    if hist_prev is None or hist <= hist_prev:
-        return ConditionResult(False, "MACD not expanding")
-    return ConditionResult(True, "MACD hist > 0 expanding")
+    if params.require_macd_expanding:
+        if hist_prev is None or hist <= hist_prev:
+            return ConditionResult(False, "MACD not expanding")
+    return ConditionResult(True, "MACD OK")
 
 
 def check_bollinger(

@@ -9,6 +9,10 @@ call :kill_port 8000 "API"
 call :kill_port 8080 "UI"
 
 echo.
+echo  Stopping paper bot processes...
+taskkill /FI "WINDOWTITLE eq My-Trade Paper Bot*" /F >nul 2>&1
+
+echo.
 echo  Done. Close any remaining My-Trade terminal windows manually.
 echo.
 pause

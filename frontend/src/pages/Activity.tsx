@@ -20,8 +20,17 @@ import { cn } from "@/lib/utils";
 import { Download } from "lucide-react";
 import type { ActivityEvent } from "@/lib/types";
 
+const RESEARCH_KINDS = [
+  "research_proposal",
+  "research_skipped",
+  "research_not_approved",
+  "research_reflection",
+];
+
 const KINDS = [
   "all",
+  "research_all",
+  ...RESEARCH_KINDS,
   "entry_submitted",
   "entry_rejected",
   "exit_submitted",
@@ -40,6 +49,10 @@ const KIND_COLOR: Record<string, string> = {
   error: "text-destructive",
   heartbeat: "text-muted-foreground",
   daily_rollover: "text-primary",
+  research_proposal: "text-primary",
+  research_skipped: "text-muted-foreground",
+  research_not_approved: "text-accent-orange",
+  research_reflection: "text-accent",
 };
 
 export default function Activity() {
@@ -55,7 +68,9 @@ export default function Activity() {
   const filtered = useMemo(() => {
     return events.filter((e) => {
       if (!showHeartbeat && e.kind === "heartbeat") return false;
-      if (kind !== "all" && e.kind !== kind) return false;
+      if (kind === "research_all") {
+        if (!RESEARCH_KINDS.includes(e.kind)) return false;
+      } else if (kind !== "all" && e.kind !== kind) return false;
       if (search && !e.detail.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });

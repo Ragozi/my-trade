@@ -91,6 +91,10 @@ class TestMacd:
     def test_positive_and_expanding_passes(self) -> None:
         assert check_macd(0.3, 0.2, P).passed is True
 
+    def test_filter_off_passes_negative_hist(self) -> None:
+        pr = params(require_macd_positive=False, require_macd_expanding=False)
+        assert check_macd(-1.0, -2.0, pr).passed is True
+
 
 class TestBollinger:
     def test_filter_off_passes(self) -> None:

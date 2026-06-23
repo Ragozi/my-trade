@@ -88,6 +88,8 @@ class StrategyParams:
     require_15m_uptrend: bool = True
     require_volume_spike: bool = False
     require_rsi_turning_up: bool = True
+    require_macd_positive: bool = True
+    require_macd_expanding: bool = True
     bollinger_lower_half_only: bool = True
     bollinger_period: int = 20
     bollinger_std: float = 2.0
@@ -115,6 +117,8 @@ class StrategyParams:
             require_15m_uptrend=s.require_15m_uptrend,
             require_volume_spike=s.require_volume_spike,
             require_rsi_turning_up=s.require_rsi_turning_up,
+            require_macd_positive=s.require_macd_positive,
+            require_macd_expanding=s.require_macd_expanding,
             bollinger_lower_half_only=s.bollinger_lower_half_only,
             bollinger_period=s.bollinger_period,
             bollinger_std=s.bollinger_std,

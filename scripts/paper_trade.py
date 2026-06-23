@@ -57,11 +57,27 @@ from my_trade.data.alpaca_data import AlpacaDataProvider  # noqa: E402
 from my_trade.data.alpaca_movers import AlpacaMoversUniverse  # noqa: E402
 from my_trade.data.stock_data import StockHistoricalDataProvider  # noqa: E402
 from my_trade.observability import Journal  # noqa: E402
+from my_trade.research import (
+    build_research_advisor,
+    build_research_client,
+    build_research_evaluation,
+    build_research_memory,
+    research_is_active,
+)
 
 ALLOW_LIVE = False  # HARD GUARD — never flip this on in the paper runner.
 HEARTBEAT_EVERY_N_CYCLES = 10  # journal an equity pulse this often in the loop
 
 log = logging.getLogger("my_trade.paper")
+
+_RESEARCH_KINDS = frozenset(
+    {
+        ActionKind.RESEARCH_PROPOSAL,
+        ActionKind.RESEARCH_SKIPPED,
+        ActionKind.RESEARCH_NOT_APPROVED,
+        ActionKind.RESEARCH_REFLECTION,
+    }
+)
 
 
 def setup_logging() -> None:
@@ -176,6 +192,51 @@ def build_screener(settings: Settings, data: object) -> Screener | None:
     return screener
 
 
+def log_research_status(settings: Settings, research: object | None) -> None:
+    """Startup banner for Phase 4 — makes activation state obvious in console."""
+    rc = settings.research
+    if not rc.enabled:
+        log.info(
+            "Claude research DISABLED (ENABLE_CLAUDE=false) — deterministic-only mode"
+        )
+        return
+    if research is None:
+        log.error(
+            "ENABLE_CLAUDE=true but research advisor failed to build — check ANTHROPIC_API_KEY"
+        )
+        return
+    active = research_is_active(settings)
+    if not active:
+        log.warning(
+            "Claude research ENABLED in config but INACTIVE for asset_class=%s "
+            "(CLAUDE_EQUITIES_ONLY=%s). Switch ASSET_CLASS=equities to activate.",
+            settings.asset_class,
+            rc.equities_only,
+        )
+        return
+    log.info(
+        "Claude research ACTIVE | advisory mode | model=%s interval=%ds "
+        "require_approval=%s postmortem=%s memory=%s",
+        rc.model,
+        rc.min_interval_seconds,
+        rc.require_approval_for_entry,
+        rc.postmortem_enabled,
+        rc.memory_file,
+    )
+
+
+def build_research_stack(settings: Settings) -> tuple[object | None, object | None, object | None]:
+    """Build advisor + memory + evaluation only when ENABLE_CLAUDE=true."""
+    if not settings.research.enabled:
+        return None, None, None
+    client = build_research_client(settings)
+    return (
+        build_research_advisor(settings, client=client),
+        build_research_memory(settings, client=client),
+        build_research_evaluation(settings),
+    )
+
+
 def build_orchestrator(
     settings: Settings,
     *,
@@ -183,6 +244,9 @@ def build_orchestrator(
     account: object,
     execution: object,
     screener: Screener | None = None,
+    research_advisor: object | None = None,
+    research_memory: object | None = None,
+    research_evaluation: object | None = None,
 ) -> TradingOrchestrator:
     strategy = PullbackStrategy(StrategyParams.from_settings(settings))
     return TradingOrchestrator(
@@ -193,6 +257,7 @@ def build_orchestrator(
         store=DailyStateStore(settings.runtime.daily_state_file),
         limits=settings.risk.to_limits(),
         symbols=settings.symbols,
+        asset_class=settings.asset_class,
         entry_timeframe=settings.runtime.entry_timeframe,
         trend_timeframe=settings.runtime.trend_timeframe,
         trend_timeframe_15m=settings.runtime.trend_timeframe_15m,
@@ -201,6 +266,10 @@ def build_orchestrator(
         fallback_stop_pct=settings.strategy.stop_loss_pct,
         watchlist=screener.select if screener is not None else None,
         session_is_open=make_session_guard(settings.asset_class),
+        research_advisor=research_advisor,  # type: ignore[arg-type]
+        research_memory=research_memory,  # type: ignore[arg-type]
+        research_evaluation=research_evaluation,  # type: ignore[arg-type]
+        journal_path=settings.runtime.journal_db,
     )
 
 
@@ -379,8 +448,17 @@ def run_once(settings: Settings) -> int:
     account = _CountingAccount(providers.account)
     execution = _CountingExecution(build_execution(settings, providers.broker))
     screener = build_screener(settings, data)
+    research, memory, evaluation = build_research_stack(settings)
+    log_research_status(settings, research)
     orchestrator = build_orchestrator(
-        settings, data=data, account=account, execution=execution, screener=screener
+        settings,
+        data=data,
+        account=account,
+        execution=execution,
+        screener=screener,
+        research_advisor=research,
+        research_memory=memory,
+        research_evaluation=evaluation,
     )
 
     journal = Journal(settings.runtime.journal_db)
@@ -412,8 +490,10 @@ def run_once(settings: Settings) -> int:
 
 def log_cycle(result: CycleResult) -> None:
     flag = "HALTED" if result.halted else "ok"
+    research_count = sum(1 for a in result.actions if a.kind in _RESEARCH_KINDS)
     log.info(
-        "cycle %s | equity=$%.2f day_pnl=$%.2f peak=$%.2f open=%d [%s]",
+        "cycle %s | equity=$%.2f day_pnl=$%.2f peak=$%.2f open=%d [%s]"
+        + (" | claude_events=%d" % research_count if research_count else ""),
         result.timestamp.strftime("%H:%M:%S"),
         result.equity,
         result.day_pnl,
@@ -422,21 +502,37 @@ def log_cycle(result: CycleResult) -> None:
         flag,
     )
     for action in result.actions:
-        log.info(
-            "  - %-18s %-10s %s", action.kind.value, action.symbol, action.detail or action.status
-        )
+        if action.kind in _RESEARCH_KINDS:
+            log.info(
+                "  [CLAUDE] %-18s %-10s %s",
+                action.kind.value,
+                action.symbol,
+                action.detail or action.status,
+            )
+        else:
+            log.info(
+                "  - %-18s %-10s %s",
+                action.kind.value,
+                action.symbol,
+                action.detail or action.status,
+            )
 
 
 def run_loop(settings: Settings) -> int:
     providers = build_providers(settings)
     execution = build_execution(settings, providers.broker)
     screener = build_screener(settings, providers.data)
+    research, memory, evaluation = build_research_stack(settings)
+    log_research_status(settings, research)
     orchestrator = build_orchestrator(
         settings,
         data=providers.data,
         account=providers.account,
         execution=execution,
         screener=screener,
+        research_advisor=research,
+        research_memory=memory,
+        research_evaluation=evaluation,
     )
     journal = Journal(settings.runtime.journal_db)
 

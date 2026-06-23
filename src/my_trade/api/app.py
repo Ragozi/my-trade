@@ -73,6 +73,10 @@ def create_app() -> FastAPI:
         settings = load_settings()
         bot = get_bot_status(settings.runtime.log_dir)
         session_open = make_session_guard(settings.asset_class)(datetime.now(UTC))
+        rc = settings.research
+        research_active = rc.enabled and (
+            not rc.equities_only or settings.is_equities
+        )
         return {
             "bot": {
                 "running": bot.running,
@@ -84,6 +88,12 @@ def create_app() -> FastAPI:
             "session": {"open": session_open, "asset_class": settings.asset_class},
             "halted": bot.halted,
             "halt_reason": bot.halt_reason,
+            "research": {
+                "enabled": rc.enabled,
+                "active": research_active,
+                "require_approval": rc.require_approval_for_entry,
+                "model": rc.model if rc.enabled else None,
+            },
         }
 
     @app.get("/api/account")

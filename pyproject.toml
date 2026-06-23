@@ -21,6 +21,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
     "pydantic>=2.0",
+    "anthropic>=0.40.0",
 ]
 
 [project.optional-dependencies]
@@ -58,6 +59,7 @@ where = ["src"]
 test = "pytest"
 "test:cov" = "pytest --cov=my_trade --cov-report=term-missing"
 paper = "python -m scripts.paper_trade"
+research = "python -m scripts.research_run"
 api = "python -m scripts.api_server"
 dashboard = "streamlit run scripts/dashboard.py"
 lint = "ruff check ."

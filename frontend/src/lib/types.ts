@@ -31,6 +31,12 @@ export interface Status {
   session: { open: boolean; asset_class: AssetClass };
   halted: boolean;
   halt_reason: string | null;
+  research?: {
+    enabled: boolean;
+    active: boolean;
+    require_approval: boolean;
+    model: string | null;
+  };
 }
 
 export interface Position {
@@ -104,7 +110,15 @@ export interface ActivityEvent {
 }
 
 export interface Stats {
-  today: { entries: number; exits: number; halts: number; errors: number };
+  today: {
+    entries: number;
+    exits: number;
+    halts: number;
+    errors: number;
+    research_proposals?: number;
+    research_skipped?: number;
+    research_reflections?: number;
+  };
   daily_state: {
     trading_day: string;
     start_of_day_equity: number;

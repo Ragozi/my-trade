@@ -5,15 +5,17 @@
 > See `SCOPE.md` for risk rules and success criteria, `ARCHITECTURE.md` for design.
 
 ```
-Phase 0  Foundations            ← we are here
-Phase 1  Deterministic Core MVP
-Phase 2  Backtesting & Validation
-Phase 3  Paper Hardening (reliability + observability)
-Phase 4  Claude Research Layer (guardrailed, advisory)
-Phase 5  Live (small size) + ongoing ops
+Phase 0  Foundations            [x]
+Phase 1  Deterministic Core MVP  [x]
+Phase 2  Backtesting & Validation [~]
+Phase 3  Paper Hardening          [~]
+Phase 4  Claude Research Layer   [~]  ← code complete; activating in advisory mode
+Phase 5  Live (small size)       [ ]
 ```
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done
+
+**Phase 4 activation:** see [`docs/PHASE4_ACTIVATION.md`](docs/PHASE4_ACTIVATION.md).
 
 ---
 
@@ -113,21 +115,22 @@ mode through clean, layered modules. Harden the prototype — don't rewrite blin
 or risk authority. Mirrors the "deterministic + non-deterministic" split.
 
 **Deliverables**
-- [ ] `research/` package: Claude client wrapper (Anthropic API), retries, timeouts.
-- [ ] **Strict output contracts**: every Claude response is JSON, schema-validated
-      (e.g. pydantic). Invalid → discarded, system degrades to deterministic-only.
-- [ ] Capabilities (advisory only):
+- [x] `research/` package: Claude client wrapper (Anthropic API), retries, timeouts.
+- [x] **Strict output contracts**: every Claude response is JSON, schema-validated
+      (pydantic). Invalid → discarded, system degrades to deterministic-only.
+- [x] Capabilities (advisory only):
   - Candidate screening (proposes symbols/watchlist — core still filters).
   - Catalyst/news/thesis summaries attached to journal + alerts.
-  - Daily portfolio commentary (read-only).
-  - Optional **veto/confidence score** that can *block* a trade but never *create* one.
-- [ ] Cost controls: cache, rate-limit, "once per cycle/day" budgets.
-- [ ] Kill flag: `ENABLE_CLAUDE=false` fully disables the layer with no behavior change to core.
+  - Memory/reflection fed back into future research calls.
+  - Optional **veto/confidence score** (`CLAUDE_REQUIRE_APPROVAL`) — off by default.
+- [x] Cost controls: rate-limit, per-day budgets, `ENABLE_CLAUDE=false` kill switch.
+- [x] Evaluation logging (`research_evaluation.json`) for Claude vs strategy alignment.
+- [ ] 7-day paper run with Claude enabled; review memory + evaluation artifacts.
 
 **Exit Gate**
 - [ ] Claude layer can be toggled off with zero impact on deterministic safety.
-- [ ] Tests prove invalid/malicious Claude output cannot place/modify orders or limits.
-- [ ] Cost per day measured and within budget.
+- [x] Tests prove invalid/malicious Claude output cannot place/modify orders or limits.
+- [ ] Cost per day measured and within budget during live paper activation.
 
 ---
 

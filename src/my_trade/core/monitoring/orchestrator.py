@@ -12,7 +12,7 @@ Safety invariants preserved here:
     re-runs ``evaluate_trade``); the orchestrator additionally halts entries on
     circuit-breaker / daily-loss.
   * Daily state is persisted after every mutation so restarts never double-count.
-  * No research/Claude calls (Phase 4).
+  * No research/Claude calls unless a ``ResearchAdvisor`` is injected (Phase 4).
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from my_trade.core.risk import (
     is_daily_loss_limit_hit,
 )
 from my_trade.data import MarketDataProvider, normalize_symbol
+from my_trade.research.models import ClaudeProposal
 
 from .account import AccountProvider, AccountSnapshot
 from .models import ActionKind, CycleAction, CycleResult, HaltReason
@@ -48,6 +49,9 @@ from .store import DailyStateStore
 if TYPE_CHECKING:
     from my_trade.core.risk import AccountState
     from my_trade.core.strategy.models import ScanEvaluation, Signal
+    from my_trade.research.advisor import ResearchAdvisor
+    from my_trade.research.evaluation import ResearchEvaluationStore
+    from my_trade.research.memory import ResearchMemoryStore
 
 
 class StrategyEngine(Protocol):
@@ -104,8 +108,13 @@ class TradingOrchestrator:
         bar_limit: int = 200,
         max_entries_per_symbol_per_day: int = 10,
         fallback_stop_pct: float = 0.0065,
+        asset_class: str = "crypto",
         watchlist: Callable[[], Sequence[str]] | None = None,
         session_is_open: Callable[[datetime], bool] | None = None,
+        research_advisor: ResearchAdvisor | None = None,
+        research_memory: ResearchMemoryStore | None = None,
+        research_evaluation: ResearchEvaluationStore | None = None,
+        journal_path: str | None = None,
         clock: Callable[[], datetime] = _utcnow,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -118,12 +127,17 @@ class TradingOrchestrator:
         self._symbols = tuple(symbols)
         self._watchlist = watchlist
         self._session_is_open = session_is_open
+        self._research = research_advisor
+        self._memory = research_memory
+        self._evaluation = research_evaluation
+        self._journal_path = journal_path
         self._entry_tf = entry_timeframe
         self._trend_tf = trend_timeframe
         self._trend_tf_15m = trend_timeframe_15m
         self._bar_limit = bar_limit
         self._max_entries = max_entries_per_symbol_per_day
         self._fallback_stop_pct = fallback_stop_pct
+        self._asset_class = asset_class
         self._clock = clock
         self._log = logger or logging.getLogger("my_trade.monitoring")
         self._state: DailyState = self._store.load() or DailyState.empty()
@@ -202,7 +216,15 @@ class TradingOrchestrator:
                 actions=tuple(actions),
             )
 
-        # (3) Session gate — never open NEW entries while the market is closed
+        # (3) Claude research (advisory) — runs even when the session is closed so
+        # proposals and memory keep updating; entries remain session-gated below.
+        open_symbols = {normalize_symbol(p.symbol) for p in snapshot.positions}
+        research_actions, research_proposal = self._run_research(
+            snapshot, account_state, when, open_symbols
+        )
+        actions.extend(research_actions)
+
+        # (4) Session gate — never open NEW entries while the market is closed
         # (exits above still run; bracket legs remain live at the broker).
         if self._session_is_open is not None and not self._session_is_open(when):
             self._log.info("market closed; skipping new entries this cycle")
@@ -216,9 +238,10 @@ class TradingOrchestrator:
                 actions=tuple(actions),
             )
 
-        # (4) Entries.
-        open_symbols = {normalize_symbol(p.symbol) for p in snapshot.positions}
-        actions.extend(self._scan_entries(open_symbols, account_state, when))
+        # (5) Entries.
+        actions.extend(
+            self._scan_entries(open_symbols, account_state, when, research_proposal)
+        )
 
         return CycleResult(
             timestamp=when,
@@ -251,6 +274,36 @@ class TradingOrchestrator:
                 self._persist(clear_position(self._state, pos.symbol))
                 self._log.info("EXIT %s (%s)", pos.symbol, reason)
                 actions.append(CycleAction(ActionKind.EXIT_SUBMITTED, pos.symbol, reason))
+                if self._memory is not None:
+                    reflection = self._memory.record_close(
+                        symbol=pos.symbol,
+                        exit_reason=reason,
+                        entry_price=pos.avg_entry_price,
+                        qty=pos.qty,
+                        unrealized_pl=pos.unrealized_pl,
+                        closed_at=when,
+                    )
+                    if self._evaluation is not None:
+                        self._evaluation.record_outcome(
+                            symbol=pos.symbol,
+                            outcome=reflection.outcome,
+                            pnl_estimate=reflection.pnl_estimate,
+                            when=when,
+                        )
+                    detail = reflection.llm_summary or reflection.summary
+                    self._log.info(
+                        "CLAUDE reflection %s (%s) | %s",
+                        pos.symbol,
+                        reflection.outcome,
+                        detail[:160],
+                    )
+                    actions.append(
+                        CycleAction(
+                            ActionKind.RESEARCH_REFLECTION,
+                            pos.symbol,
+                            detail,
+                        )
+                    )
             else:
                 self._log.error("exit failed for %s: %s", pos.symbol, outcome.detail)
                 actions.append(
@@ -258,19 +311,154 @@ class TradingOrchestrator:
                 )
         return actions
 
+    def _open_risk_dollars(self, snapshot: AccountSnapshot) -> float:
+        total = 0.0
+        for pos in snapshot.positions:
+            sym = normalize_symbol(pos.symbol)
+            stop = self._state.position_stops.get(sym)
+            if stop is None:
+                stop = pos.avg_entry_price * (1.0 - self._fallback_stop_pct)
+            risk_per_share = pos.avg_entry_price - stop
+            if risk_per_share > 0:
+                total += risk_per_share * pos.qty
+        return total
+
+    def _claude_long(self, symbol: str, proposal: ClaudeProposal | None) -> bool:
+        if self._research is None or proposal is None or proposal.skipped:
+            return False
+        return symbol.upper() in self._research.approved_symbols(proposal)
+
+    def _run_research(
+        self,
+        snapshot: AccountSnapshot,
+        account_state: AccountState,
+        when: datetime,
+        open_symbols: set[str],
+    ) -> tuple[list[CycleAction], object | None]:
+        if self._research is None or not self._research.is_active_for(self._asset_class):
+            if self._research is not None and not self._research.is_active_for(
+                self._asset_class
+            ):
+                self._log.debug(
+                    "CLAUDE research inactive (asset_class=%s, equities_only=%s)",
+                    self._asset_class,
+                    self._research.config.equities_only,
+                )
+            return [], None
+        session_open = True
+        if self._session_is_open is not None:
+            session_open = self._session_is_open(when)
+        if self._research.config.market_hours_only and not session_open:
+            self._log.debug("CLAUDE research skipped (market closed, CLAUDE_MARKET_HOURS_ONLY=true)")
+            return [], None
+        candidates = self._active_symbols()
+        if not candidates:
+            return [], None
+        sym_set = frozenset(normalize_symbol(s) for s in candidates)
+        recent_reflections = ()
+        performance = None
+        if self._memory is not None:
+            if self._journal_path:
+                self._memory.enrich_from_journal(
+                    self._journal_path, candidate_symbols=candidates
+                )
+            recent_reflections = self._memory.recent_reflections(
+                limit=10, symbols=sym_set
+            )
+            performance = self._memory.performance_summary(symbols=sym_set)
+        comparison_summary = None
+        if self._evaluation is not None:
+            comparison_summary = self._evaluation.summary()
+        from my_trade.research.context import build_research_context
+
+        context = build_research_context(
+            snapshot=snapshot,
+            candidate_symbols=candidates,
+            asset_class=self._asset_class,
+            session_open=session_open,
+            as_of=when,
+            equity=account_state.equity,
+            day_pnl=account_state.realized_day_pnl,
+            peak_equity=account_state.peak_equity,
+            open_risk_dollars=self._open_risk_dollars(snapshot),
+            recent_reflections=recent_reflections,
+            performance=performance,
+            comparison_summary=comparison_summary,
+        )
+        result = self._research.propose(context, when=when)
+        proposal = result.proposal
+        actions: list[CycleAction] = []
+        if proposal.skipped:
+            self._log.info(
+                "CLAUDE research skipped: %s",
+                proposal.skip_reason or "skipped",
+            )
+            actions.append(
+                CycleAction(
+                    ActionKind.RESEARCH_SKIPPED,
+                    detail=proposal.skip_reason or "skipped",
+                )
+            )
+            return actions, proposal
+        if self._memory is not None:
+            self._memory.note_proposals(proposal.ideas)
+        self._log.info(
+            "CLAUDE research | %d ideas (%d long) | %s",
+            len(proposal.ideas),
+            len(proposal.long_ideas),
+            (proposal.summary or "no summary")[:160],
+        )
+        for idea in proposal.ideas:
+            detail = (
+                f"{idea.action.value} conf={idea.confidence:.2f} "
+                f"{idea.instrument.value} {idea.time_horizon}: {idea.thesis[:240]}"
+            )
+            actions.append(
+                CycleAction(ActionKind.RESEARCH_PROPOSAL, idea.symbol, detail)
+            )
+            if idea.action.value == "long":
+                self._log.info(
+                    "CLAUDE idea %s long conf=%.2f | %s",
+                    idea.symbol,
+                    idea.confidence,
+                    idea.thesis[:120],
+                )
+        return actions, proposal
+
     def _scan_entries(
         self,
         open_symbols: set[str],
         account_state: AccountState,
         when: datetime,
+        research_proposal: object | None = None,
     ) -> list[CycleAction]:
         actions: list[CycleAction] = []
+        strategy_signals: dict[str, bool] = {}
+        proposal = (
+            research_proposal
+            if isinstance(research_proposal, ClaudeProposal)
+            else None
+        )
         for symbol in self._active_symbols():
-            if normalize_symbol(symbol) in open_symbols:
+            sym = normalize_symbol(symbol)
+            if sym in open_symbols:
                 actions.append(CycleAction(ActionKind.SKIP_OPEN_POSITION, symbol))
                 continue
             if self._state.entries_for(symbol) >= self._max_entries:
                 actions.append(CycleAction(ActionKind.SKIP_MAX_ENTRIES, symbol))
+                continue
+            if (
+                self._research is not None
+                and proposal is not None
+                and not self._research.allows_entry(symbol, proposal)
+            ):
+                actions.append(
+                    CycleAction(
+                        ActionKind.RESEARCH_NOT_APPROVED,
+                        symbol,
+                        "Claude did not approve this symbol for entry",
+                    )
+                )
                 continue
 
             signal, evaluation = self._strategy.detect_entry(
@@ -280,6 +468,7 @@ class TradingOrchestrator:
                 self._get_bars(symbol, self._trend_tf_15m),
                 when,
             )
+            strategy_signals[sym] = signal is not None
             if signal is None:
                 self._log.debug("no signal %s: %s", symbol, evaluation.summary)
                 actions.append(CycleAction(ActionKind.NO_SIGNAL, symbol, evaluation.summary))
@@ -290,6 +479,13 @@ class TradingOrchestrator:
             )
             if outcome.submitted:
                 self._persist(record_entry(self._state, symbol, signal.stop_price, when))
+                if self._evaluation is not None:
+                    self._evaluation.record_entry(
+                        symbol=symbol,
+                        when=when,
+                        claude_long=self._claude_long(symbol, proposal),
+                        strategy_signal=True,
+                    )
                 self._log.info(
                     "ENTRY %s @ %.2f stop %.2f tp %.2f conf %.2f",
                     symbol,
@@ -317,4 +513,13 @@ class TradingOrchestrator:
                         outcome.status.value,
                     )
                 )
+        if self._evaluation is not None and proposal is not None and not proposal.skipped:
+            min_conf = self._research.config.min_confidence if self._research else 0.55
+            self._evaluation.record_cycle(
+                when=when,
+                symbols=self._active_symbols(),
+                proposal=proposal,
+                strategy_signals=strategy_signals,
+                min_confidence=min_conf,
+            )
         return actions

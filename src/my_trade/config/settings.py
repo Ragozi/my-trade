@@ -97,6 +97,8 @@ class StrategySettings:
     require_volume_spike: bool = False
     require_above_ema9: bool = False
     require_rsi_turning_up: bool = True
+    require_macd_positive: bool = True
+    require_macd_expanding: bool = True
     bollinger_lower_half_only: bool = True
     bollinger_period: int = 20
     bollinger_std: float = 2.0
@@ -168,6 +170,32 @@ class RuntimeSettings:
 
 
 @dataclass(frozen=True)
+class ResearchSettings:
+    """Claude research layer knobs (advisory only)."""
+
+    enabled: bool = False
+    api_key: str = ""
+    model: str = "claude-sonnet-4-20250514"
+    max_tokens: int = 4096
+    timeout_seconds: float = 60.0
+    max_ideas_per_cycle: int = 5
+    min_confidence: float = 0.55
+    min_interval_seconds: int = 300
+    max_calls_per_day: int = 100
+    require_approval_for_entry: bool = False
+    equities_only: bool = True
+    memory_file: str = "logs/research_memory.json"
+    memory_max_reflections: int = 100
+    performance_window: int = 20
+    evaluation_file: str = "logs/research_evaluation.json"
+    evaluation_max_records: int = 500
+    postmortem_enabled: bool = False
+    postmortem_max_per_day: int = 1
+    market_hours_only: bool = True
+    billing_cooldown_seconds: int = 3600
+
+
+@dataclass(frozen=True)
 class Settings:
     """Top-level composed settings object."""
 
@@ -176,6 +204,7 @@ class Settings:
     strategy: StrategySettings
     runtime: RuntimeSettings
     screener: ScreenerSettings = ScreenerSettings()
+    research: ResearchSettings = ResearchSettings()
     asset_class: str = ASSET_CLASS_CRYPTO
     crypto_mode: bool = True
     symbols: tuple[str, ...] = (DEFAULT_CRYPTO_SYMBOL,)
@@ -202,6 +231,10 @@ class Settings:
         if not self.alpaca.paper_trading and not self.alpaca.allow_live_trading:
             raise ValueError(
                 "Live trading requires PAPER_TRADING=false AND ALLOW_LIVE_TRADING=true"
+            )
+        if self.research.enabled and not self.research.api_key:
+            raise ValueError(
+                "ENABLE_CLAUDE=true requires ANTHROPIC_API_KEY in .env"
             )
 
 
@@ -242,6 +275,8 @@ def _load_strategy(env: Mapping[str, str]) -> StrategySettings:
         require_volume_spike=env_bool(env, "REQUIRE_VOLUME_SPIKE", False),
         require_above_ema9=env_bool(env, "REQUIRE_ABOVE_EMA9", False),
         require_rsi_turning_up=env_bool(env, "REQUIRE_RSI_TURNING_UP", True),
+        require_macd_positive=env_bool(env, "REQUIRE_MACD_POSITIVE", True),
+        require_macd_expanding=env_bool(env, "REQUIRE_MACD_EXPANDING", True),
         bollinger_lower_half_only=env_bool(env, "BOLLINGER_LOWER_HALF_ONLY", True),
         bollinger_period=env_int(env, "BOLLINGER_PERIOD", 20),
         bollinger_std=env_float(env, "BOLLINGER_STD", 2.0),
@@ -293,6 +328,31 @@ def _load_runtime(env: Mapping[str, str]) -> RuntimeSettings:
     )
 
 
+def _load_research(env: Mapping[str, str]) -> ResearchSettings:
+    return ResearchSettings(
+        enabled=env_bool(env, "ENABLE_CLAUDE", False),
+        api_key=env_str(env, "ANTHROPIC_API_KEY", ""),
+        model=env_str(env, "CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+        max_tokens=env_int(env, "CLAUDE_MAX_TOKENS", 4096),
+        timeout_seconds=env_float(env, "CLAUDE_TIMEOUT_SECONDS", 60.0),
+        max_ideas_per_cycle=env_int(env, "CLAUDE_MAX_IDEAS", 5),
+        min_confidence=env_float(env, "CLAUDE_MIN_CONFIDENCE", 0.55),
+        min_interval_seconds=env_int(env, "CLAUDE_CALL_INTERVAL_SECONDS", 300),
+        max_calls_per_day=env_int(env, "CLAUDE_MAX_CALLS_PER_DAY", 100),
+        require_approval_for_entry=env_bool(env, "CLAUDE_REQUIRE_APPROVAL", False),
+        equities_only=env_bool(env, "CLAUDE_EQUITIES_ONLY", True),
+        memory_file=env_str(env, "CLAUDE_MEMORY_FILE", "logs/research_memory.json"),
+        memory_max_reflections=env_int(env, "CLAUDE_MEMORY_MAX_REFLECTIONS", 100),
+        performance_window=env_int(env, "CLAUDE_PERFORMANCE_WINDOW", 20),
+        evaluation_file=env_str(env, "CLAUDE_EVALUATION_FILE", "logs/research_evaluation.json"),
+        evaluation_max_records=env_int(env, "CLAUDE_EVALUATION_MAX_RECORDS", 500),
+        postmortem_enabled=env_bool(env, "CLAUDE_POSTMORTEM_ENABLED", False),
+        postmortem_max_per_day=env_int(env, "CLAUDE_POSTMORTEM_MAX_PER_DAY", 1),
+        market_hours_only=env_bool(env, "CLAUDE_MARKET_HOURS_ONLY", True),
+        billing_cooldown_seconds=env_int(env, "CLAUDE_BILLING_COOLDOWN_SECONDS", 3600),
+    )
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """Build a validated ``Settings`` from an env mapping.
 
@@ -324,6 +384,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         strategy=_load_strategy(env),
         runtime=_load_runtime(env),
         screener=_load_screener(env),
+        research=_load_research(env),
         asset_class=asset_class,
         crypto_mode=env_bool(env, "CRYPTO_MODE", asset_class == ASSET_CLASS_CRYPTO),
         symbols=symbols,

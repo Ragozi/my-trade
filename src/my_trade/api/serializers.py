@@ -52,6 +52,18 @@ def settings_to_config(settings: Settings) -> dict[str, Any]:
             "scan_interval_seconds": settings.runtime.scan_interval_seconds,
             "log_level": "INFO",
         },
+        "research": {
+            "enabled": settings.research.enabled,
+            "active": (
+                settings.research.enabled
+                and (
+                    not settings.research.equities_only or settings.is_equities
+                )
+            ),
+            "require_approval": settings.research.require_approval_for_entry,
+            "model": settings.research.model,
+            "call_interval_seconds": settings.research.min_interval_seconds,
+        },
     }
 
 
@@ -85,6 +97,9 @@ def stats_from_events(
             "exits": counts.get("exit_submitted", 0),
             "halts": counts.get("halt", 0),
             "errors": counts.get("error", 0),
+            "research_proposals": counts.get("research_proposal", 0),
+            "research_skipped": counts.get("research_skipped", 0),
+            "research_reflections": counts.get("research_reflection", 0),
         },
         "daily_state": {
             "trading_day": state.trading_day.isoformat() if state else day_prefix,

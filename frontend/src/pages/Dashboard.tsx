@@ -55,6 +55,10 @@ const KIND_COLOR: Record<string, string> = {
   error: "text-destructive",
   heartbeat: "text-muted-foreground",
   daily_rollover: "text-primary",
+  research_proposal: "text-primary",
+  research_skipped: "text-muted-foreground",
+  research_not_approved: "text-accent-orange",
+  research_reflection: "text-accent",
 };
 
 export default function Dashboard() {
@@ -167,6 +171,26 @@ export default function Dashboard() {
       />
 
       <LiveBanner />
+
+      {status?.research?.enabled && (
+        <div
+          className={cn(
+            "mb-4 rounded-md border px-3 py-2 text-xs font-data",
+            status.research.active
+              ? "border-primary/40 bg-primary/5 text-primary"
+              : "border-accent-orange/40 bg-accent-orange/5 text-accent-orange",
+          )}
+        >
+          Claude research{" "}
+          {status.research.active ? "ACTIVE (advisory)" : "ENABLED but inactive"}
+          {status.research.active && status.research.model
+            ? ` · ${status.research.model}`
+            : ""}
+          {!status.research.active && status.session?.asset_class !== "equities"
+            ? " — switch ASSET_CLASS=equities to activate"
+            : ""}
+        </div>
+      )}
 
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
@@ -282,6 +306,16 @@ export default function Dashboard() {
             <CardContent className="grid grid-cols-2 gap-3 text-sm font-data">
               <MiniStat label="Entries" value={stats?.today?.entries ?? 0} tone="green" />
               <MiniStat label="Exits" value={stats?.today?.exits ?? 0} tone="red" />
+              <MiniStat
+                label="Claude ideas"
+                value={stats?.today?.research_proposals ?? 0}
+                tone="green"
+              />
+              <MiniStat
+                label="Reflections"
+                value={stats?.today?.research_reflections ?? 0}
+                tone="purple"
+              />
               <MiniStat label="Halts" value={stats?.today?.halts ?? 0} tone="orange" />
               <MiniStat label="Errors" value={stats?.today?.errors ?? 0} tone="red" />
               <MiniStat

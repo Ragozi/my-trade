@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from my_trade.core.monitoring import CycleResult
 
 # Cycle actions worth persisting (skip routine no-signal / skip noise).
-_MATERIAL_ACTIONS = frozenset(
+_CYCLE_ACTIONS = frozenset(
     {
         "entry_submitted",
         "entry_rejected",
@@ -27,6 +27,10 @@ _MATERIAL_ACTIONS = frozenset(
         "exit_failed",
         "halt",
         "error",
+        "research_proposal",
+        "research_skipped",
+        "research_not_approved",
+        "research_reflection",
     }
 )
 
@@ -126,7 +130,7 @@ class Journal:
         """Persist material actions from a cycle; returns the number written."""
         written = 0
         for action in result.actions:
-            if action.kind.value not in _MATERIAL_ACTIONS:
+            if action.kind.value not in _CYCLE_ACTIONS:
                 continue
             self.record_event(
                 action.kind.value,

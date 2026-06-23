@@ -1,16 +1,71 @@
-"""Claude research layer (Phase 4) — ADVISORY ONLY, guardrailed.
+"""Claude research layer (Phase 4) — ADVISORY ONLY, guardrailed."""
 
-Hard guardrails (enforced by design + guard tests):
-  - MUST NOT import my_trade.core.execution or mutate risk configuration.
-  - Cannot submit/modify/cancel orders or change risk limits. Ever.
-  - Every Claude response is JSON and schema-validated (pydantic).
-    Invalid / late / over-budget -> discarded; system runs deterministic-only.
-  - Fully disabled by ENABLE_CLAUDE=false with zero change to core behavior.
+from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
+from my_trade.research.client import ClaudeResearchClient, MockClaudeResearchClient
+from my_trade.research.context import build_research_context
+from my_trade.research.evaluation import ResearchEvaluationStore
+from my_trade.research.factory import (
+    build_research_advisor,
+    build_research_client,
+    build_research_evaluation,
+    build_research_memory,
+    research_is_active,
+)
+from my_trade.research.history import (
+    compute_performance,
+    pair_trades_from_events,
+    summarize_reflection,
+)
+from my_trade.research.memory import ResearchMemoryStore
+from my_trade.research.models import (
+    ClaudeProposal,
+    ClosedTradeReflection,
+    ComparisonSummary,
+    InstrumentType,
+    OpenPositionSummary,
+    PerformanceSummary,
+    PortfolioSnapshot,
+    ResearchContext,
+    ResearchResult,
+    TradeAction,
+    TradeIdea,
+)
+from my_trade.research.portfolio import build_portfolio_snapshot, sector_for
+from my_trade.research.postmortem import PostMortemGenerator, MockPostMortemClient
+from my_trade.research.rate_limit import ResearchRateLimiter
+from my_trade.research.reflection import build_reflection
 
-Allowed outputs (advisory):
-  - candidate screening (core still applies its own filters)
-  - catalyst / news / thesis summaries (attached to journal + alerts)
-  - daily portfolio commentary (read-only)
-  - optional confidence score / VETO that can only SUPPRESS a deterministic
-    signal, never create or size one.
-"""
+__all__ = [
+    "ClaudeProposal",
+    "ClaudeResearchClient",
+    "ClosedTradeReflection",
+    "ComparisonSummary",
+    "InstrumentType",
+    "MockClaudeResearchClient",
+    "MockPostMortemClient",
+    "OpenPositionSummary",
+    "PerformanceSummary",
+    "PortfolioSnapshot",
+    "PostMortemGenerator",
+    "ResearchAdvisor",
+    "ResearchConfig",
+    "ResearchContext",
+    "ResearchEvaluationStore",
+    "ResearchMemoryStore",
+    "ResearchRateLimiter",
+    "ResearchResult",
+    "TradeAction",
+    "TradeIdea",
+    "build_portfolio_snapshot",
+    "build_research_advisor",
+    "build_research_client",
+    "build_research_context",
+    "build_research_evaluation",
+    "build_research_memory",
+    "build_reflection",
+    "compute_performance",
+    "pair_trades_from_events",
+    "research_is_active",
+    "sector_for",
+    "summarize_reflection",
+]
