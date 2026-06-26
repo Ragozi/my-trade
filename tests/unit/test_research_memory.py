@@ -9,8 +9,10 @@ from pathlib import Path
 from my_trade.observability.journal import Journal
 from my_trade.research.context import build_research_context
 from my_trade.research.history import (
+    all_closed_trades_from_events,
     classify_outcome,
     compute_performance,
+    infer_broker_closes_from_events,
     pair_trades_from_events,
 )
 from my_trade.research.memory import ResearchMemoryStore
@@ -22,6 +24,8 @@ from my_trade.research.reflection import build_reflection
 def test_classify_outcome_from_exit_reason() -> None:
     assert classify_outcome("take_profit", None) == "win"
     assert classify_outcome("stop_loss", None) == "loss"
+    assert classify_outcome("broker_bracket_stop", None) == "loss"
+    assert classify_outcome("broker_close", None) == "loss"
     assert classify_outcome("time_stop", None) == "flat"
 
 
@@ -97,6 +101,76 @@ def test_pair_trades_from_journal(tmp_path: Path) -> None:
     assert len(outcomes) == 1
     assert outcomes[0].exit_reason == "take_profit"
     assert outcomes[0].thesis_at_entry.startswith("Earnings")
+
+
+def test_infer_broker_close_from_exit_failed(tmp_path: Path) -> None:
+    db = tmp_path / "journal.db"
+    journal = Journal(db)
+    journal.record_event(
+        "entry_submitted",
+        symbol="AAPL",
+        detail="entry=280.00 stop=278.20 tp=284.76 conf=0.83",
+    )
+    journal.record_event(
+        "exit_failed",
+        symbol="AAPL",
+        detail=(
+            'close failed: {"held_for_orders":"1067",'
+            '"message":"insufficient qty available for order"}'
+        ),
+        day_pnl=-6000.0,
+    )
+    events = list(journal.fetch_all())
+    journal.close()
+
+    inferred = infer_broker_closes_from_events(events, symbols=frozenset({"AAPL"}))
+    assert len(inferred) == 1
+    assert inferred[0].exit_reason == "broker_bracket_stop"
+
+    all_outcomes = all_closed_trades_from_events(events, symbols=frozenset({"AAPL"}))
+    assert len(all_outcomes) == 1
+
+
+def test_sync_from_journal_adds_inferred_close(tmp_path: Path) -> None:
+    db = tmp_path / "journal.db"
+    journal = Journal(db)
+    journal.record_event(
+        "research_proposal",
+        symbol="AAPL",
+        detail="hold conf=0.70 shares position: earnings volatility",
+    )
+    journal.record_event(
+        "entry_submitted",
+        symbol="AAPL",
+        detail="entry=280.00 stop=278.20 tp=284.76 conf=0.83",
+    )
+    journal.record_event(
+        "exit_failed",
+        symbol="AAPL",
+        detail='{"held_for_orders":"100"}',
+    )
+    journal.close()
+
+    mem_path = tmp_path / "memory.json"
+    store = ResearchMemoryStore(mem_path)
+    added = store.sync_from_journal(db, candidate_symbols=("AAPL",))
+    assert added == 1
+    assert store._reflections[0].outcome == "loss"
+    assert store._reflections[0].exit_reason == "broker_bracket_stop"
+
+
+def test_record_session_halt(tmp_path: Path) -> None:
+    store = ResearchMemoryStore(tmp_path / "memory.json")
+    ref = store.record_session_halt(
+        halt_reason="daily_loss_limit",
+        day_pnl=-6672.0,
+        equity=94_861.0,
+        closed_at=datetime(2026, 6, 25, 18, 0, tzinfo=UTC),
+    )
+    assert ref is not None
+    assert ref.symbol == "SESSION"
+    assert ref.outcome == "loss"
+    assert "daily_loss_limit" in ref.summary
 
 
 def test_context_includes_reflections_in_prompt() -> None:

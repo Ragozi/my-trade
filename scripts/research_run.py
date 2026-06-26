@@ -103,10 +103,6 @@ def run_once(*, mock: bool, verbose: bool) -> int:
 
     candidates = _candidate_symbols(settings)
 
-    client = build_research_client(settings)
-    memory = build_research_memory(settings, client=client)
-    evaluation = build_research_evaluation(settings)
-
     if mock or not settings.research.enabled:
         client = MockClaudeResearchClient()
         advisor = ResearchAdvisor(
@@ -114,12 +110,20 @@ def run_once(*, mock: bool, verbose: bool) -> int:
             ResearchConfig(enabled=True, min_confidence=settings.research.min_confidence),
             rate_limiter=ResearchRateLimiter(min_interval_seconds=0, max_calls_per_day=999),
         )
-        log.info("using mock Claude client")
+        log.info("using mock research client")
     else:
-        advisor = build_research_advisor(settings, client=client)
+        advisor = build_research_advisor(settings)
         if advisor is None:
-            log.error("ENABLE_CLAUDE=true but advisor could not be built (check API key)")
+            log.error("Research enabled but advisor could not be built (check API keys)")
             return 1
+
+    from my_trade.research.brief import load_brief
+    from my_trade.research.factory import build_postmortem_client
+
+    pm_client = build_postmortem_client(settings)
+    memory = build_research_memory(settings, client=pm_client)
+    evaluation = build_research_evaluation(settings)
+    daily_brief = load_brief(settings.research.brief_file)
 
     sym_set = frozenset(s.upper() for s in candidates)
     recent_reflections = ()
@@ -148,6 +152,7 @@ def run_once(*, mock: bool, verbose: bool) -> int:
         recent_reflections=recent_reflections,
         performance=performance,
         comparison_summary=comparison_summary,
+        daily_brief=daily_brief,
     )
 
     result = advisor.propose(context, when=now)
@@ -160,6 +165,7 @@ def run_once(*, mock: bool, verbose: bool) -> int:
         "skip_reason": proposal.skip_reason,
         "summary": proposal.summary,
         "model": proposal.model,
+        "provider": proposal.provider,
         "latency_ms": proposal.latency_ms,
         "ideas": [i.model_dump() for i in proposal.ideas],
         "portfolio": context.portfolio.model_dump() if context.portfolio else None,

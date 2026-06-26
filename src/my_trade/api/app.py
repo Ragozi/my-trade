@@ -74,9 +74,10 @@ def create_app() -> FastAPI:
         bot = get_bot_status(settings.runtime.log_dir)
         session_open = make_session_guard(settings.asset_class)(datetime.now(UTC))
         rc = settings.research
-        research_active = rc.enabled and (
+        research_active = rc.enabled and rc.any_tier_enabled and (
             not rc.equities_only or settings.is_equities
         )
+        wh = rc.workhorse
         return {
             "bot": {
                 "running": bot.running,
@@ -92,7 +93,28 @@ def create_app() -> FastAPI:
                 "enabled": rc.enabled,
                 "active": research_active,
                 "require_approval": rc.require_approval_for_entry,
-                "model": rc.model if rc.enabled else None,
+                "tier_mode": rc.tier_mode,
+                "claude_enabled": rc.claude_enabled,
+                "claude_model": rc.model if rc.claude_enabled else None,
+                "workhorse_provider": wh.provider if wh.is_active else None,
+                "workhorse_model": (
+                    wh.openai_model
+                    if wh.provider == "openai"
+                    else wh.xai_model
+                    if wh.provider == "xai"
+                    else None
+                ),
+                "premium_provider": (
+                    rc.premium.provider if rc.premium_active else None
+                ),
+                "premium_model": (
+                    rc.premium.openai_model
+                    if rc.premium_active and rc.premium.provider == "openai"
+                    else rc.premium.xai_model
+                    if rc.premium_active and rc.premium.provider == "xai"
+                    else None
+                ),
+                "model": rc.model if rc.claude_enabled else None,
             },
         }
 
@@ -112,9 +134,21 @@ def create_app() -> FastAPI:
             ).get_snapshot()
         except Exception as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        tc = settings.risk.trading_capital
+        risk_equity = snap.equity
         day_pnl = snap.equity - start_eq if daily else 0.0
+        if daily and tc > 0:
+            from my_trade.core.monitoring.state import resolve_risk_equity
+
+            risk_equity, day_pnl, start_eq = resolve_risk_equity(
+                snap.equity, daily, trading_capital=tc
+            )
+            if daily.broker_sod_equity <= 0:
+                risk_equity, day_pnl, start_eq = tc, 0.0, tc
+        elif daily:
+            day_pnl = snap.equity - start_eq
         if daily:
-            peak = max(peak, snap.equity)
+            peak = max(peak, risk_equity if tc > 0 else snap.equity)
         positions = [
             {
                 "symbol": p.symbol,
@@ -126,7 +160,9 @@ def create_app() -> FastAPI:
             for p in snap.positions
         ]
         return {
-            "equity": snap.equity,
+            "equity": risk_equity if tc > 0 else snap.equity,
+            "broker_equity": snap.equity,
+            "trading_capital": tc if tc > 0 else None,
             "cash": snap.cash,
             "buying_power": snap.cash,
             "day_pnl": day_pnl,

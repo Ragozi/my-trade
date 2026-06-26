@@ -1,10 +1,12 @@
 """Claude research layer (Phase 4) — ADVISORY ONLY, guardrailed."""
 
 from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
+from my_trade.research.composite import CompositeResearchAdvisor
 from my_trade.research.client import ClaudeResearchClient, MockClaudeResearchClient
 from my_trade.research.context import build_research_context
 from my_trade.research.evaluation import ResearchEvaluationStore
 from my_trade.research.factory import (
+    build_postmortem_client,
     build_research_advisor,
     build_research_client,
     build_research_evaluation,
@@ -36,6 +38,7 @@ from my_trade.research.rate_limit import ResearchRateLimiter
 from my_trade.research.reflection import build_reflection
 
 __all__ = [
+    "CompositeResearchAdvisor",
     "ClaudeProposal",
     "ClaudeResearchClient",
     "ClosedTradeReflection",
@@ -57,6 +60,7 @@ __all__ = [
     "TradeAction",
     "TradeIdea",
     "build_portfolio_snapshot",
+    "build_postmortem_client",
     "build_research_advisor",
     "build_research_client",
     "build_research_context",

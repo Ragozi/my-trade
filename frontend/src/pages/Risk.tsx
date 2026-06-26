@@ -6,6 +6,9 @@ import { useAccount, useConfig, useEvents, useStats, useStatus } from "@/hooks/u
 import { fmtPct, fmtTs, fmtUsd } from "@/lib/format";
 import { AlertOctagon, ShieldAlert } from "lucide-react";
 
+/** Config stores fractions (0.01 = 1%). */
+const pct = (n: number | undefined, fallback: number) => (n ?? fallback) * 100;
+
 export default function Risk() {
   const { data: account } = useAccount();
   const { data: cfg } = useConfig();
@@ -14,6 +17,8 @@ export default function Risk() {
   const { data: events = [] } = useEvents({ limit: 500, kind: "halt" });
 
   const equity = account?.equity ?? 0;
+  const brokerEquity = account?.broker_equity ?? null;
+  const tradingCapital = cfg?.risk?.trading_capital ?? account?.trading_capital ?? 0;
   const peak = stats?.daily_state?.peak_equity ?? account?.peak_equity ?? equity;
   const dayStartEquity = stats?.daily_state?.start_of_day_equity ?? equity;
   const dayPnl = account?.day_pnl ?? 0;
@@ -22,11 +27,27 @@ export default function Risk() {
   const drawdownPct = peak ? Math.max(0, (peak - equity) / peak) * 100 : 0;
 
   const limits = cfg?.risk;
+  const cap = tradingCapital > 0 ? tradingCapital : equity;
+  const maxRiskUsd = cap * (limits?.max_risk_per_trade_pct ?? 0.01);
+  const maxPosUsd = cap * (limits?.max_notional_pct ?? 0.2);
+  const dailyHaltUsd = cap * (limits?.daily_loss_limit_pct ?? 0.03);
 
   return (
     <div>
       <PageHeader title="Risk & halts" subtitle="Live exposure vs. configured limits" />
       <LiveBanner />
+
+      {tradingCapital > 0 && (
+        <div className="mb-4 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-data">
+          <span className="text-primary font-semibold">Virtual account ${tradingCapital.toLocaleString()}</span>
+          {brokerEquity != null && (
+            <span className="text-muted-foreground">
+              {" "}
+              · Alpaca paper {fmtUsd(brokerEquity)} (sizing uses virtual balance)
+            </span>
+          )}
+        </div>
+      )}
 
       {status?.halted && (
         <div className="mb-4 flex items-start gap-3 px-4 py-3 rounded-lg border border-destructive/40 bg-destructive/10 text-destructive">
@@ -42,31 +63,34 @@ export default function Risk() {
         <LimitCard
           title="Day P&L vs daily loss limit"
           current={dayLossPct}
-          limit={limits?.daily_loss_limit_pct ?? 5}
-          subLeft={`Day P&L: ${fmtUsd(dayPnl)}`}
+          limit={pct(limits?.daily_loss_limit_pct, 0.03)}
+          subLeft={`Day P&L: ${fmtUsd(dayPnl)} · halt ~${fmtUsd(-dailyHaltUsd)}`}
         />
         <LimitCard
           title="Drawdown from peak"
           current={drawdownPct}
-          limit={limits?.max_drawdown_pct ?? 15}
+          limit={pct(limits?.max_drawdown_pct, 0.15)}
           subLeft={`Peak: ${fmtUsd(peak)} · Equity: ${fmtUsd(equity)}`}
         />
         <LimitCard
           title="Open risk vs max"
           current={0}
-          limit={limits?.max_open_risk_pct ?? 7}
+          limit={pct(limits?.max_open_risk_pct, 0.05)}
           subLeft="Computed from open positions on backend"
         />
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-display">Configured limits</CardTitle>
+            <CardTitle className="text-sm font-display">Slow &amp; steady limits</CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-3 text-xs font-data">
-            <Row label="Per trade" value={fmtPct(limits?.max_risk_per_trade_pct ?? 2)} />
-            <Row label="Open risk" value={fmtPct(limits?.max_open_risk_pct ?? 7)} />
-            <Row label="Daily loss" value={fmtPct(limits?.daily_loss_limit_pct ?? 5)} />
-            <Row label="Max drawdown" value={fmtPct(limits?.max_drawdown_pct ?? 15)} />
-            <Row label="Max positions" value={String(limits?.max_concurrent_positions ?? 3)} />
+            <Row label="Per trade" value={fmtPct(pct(limits?.max_risk_per_trade_pct, 0.01))} />
+            <Row label="Max position" value={fmtPct(pct(limits?.max_notional_pct, 0.2))} />
+            <Row label="Daily loss" value={fmtPct(pct(limits?.daily_loss_limit_pct, 0.03))} />
+            <Row label="Max drawdown" value={fmtPct(pct(limits?.max_drawdown_pct, 0.15))} />
+            <Row label="Max positions" value={String(limits?.max_concurrent_positions ?? 1)} />
+            <Row label="Trading capital" value={tradingCapital > 0 ? fmtUsd(tradingCapital, 0) : "—"} />
+            <Row label="~$ risk / trade" value={fmtUsd(maxRiskUsd)} />
+            <Row label="~$ max position" value={fmtUsd(maxPosUsd)} />
           </CardContent>
         </Card>
       </div>

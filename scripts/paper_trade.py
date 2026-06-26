@@ -59,9 +59,9 @@ from my_trade.data.stock_data import StockHistoricalDataProvider  # noqa: E402
 from my_trade.observability import Journal  # noqa: E402
 from my_trade.research import (
     build_research_advisor,
-    build_research_client,
     build_research_evaluation,
     build_research_memory,
+    build_postmortem_client,
     research_is_active,
 )
 
@@ -193,46 +193,55 @@ def build_screener(settings: Settings, data: object) -> Screener | None:
 
 
 def log_research_status(settings: Settings, research: object | None) -> None:
-    """Startup banner for Phase 4 — makes activation state obvious in console."""
+    """Startup banner for research tiers."""
     rc = settings.research
     if not rc.enabled:
         log.info(
-            "Claude research DISABLED (ENABLE_CLAUDE=false) — deterministic-only mode"
+            "Research DISABLED (ENABLE_RESEARCH=false, no tiers) — deterministic-only mode"
         )
         return
     if research is None:
         log.error(
-            "ENABLE_CLAUDE=true but research advisor failed to build — check ANTHROPIC_API_KEY"
+            "Research enabled but advisor failed to build — check API keys in .env"
         )
         return
     active = research_is_active(settings)
+    tiers: list[str] = []
+    if rc.claude_enabled:
+        tiers.append(f"claude/{rc.model}")
+    if rc.premium_active:
+        prem = rc.premium
+        model = prem.openai_model if prem.provider == "openai" else prem.xai_model
+        tiers.append(f"premium/{prem.provider}/{model}")
+    if rc.workhorse.is_active:
+        wh = rc.workhorse
+        model = wh.openai_model if wh.provider == "openai" else wh.xai_model
+        tiers.append(f"{wh.provider}/{model}")
+    tier_label = " + ".join(tiers) if tiers else "none"
     if not active:
         log.warning(
-            "Claude research ENABLED in config but INACTIVE for asset_class=%s "
-            "(CLAUDE_EQUITIES_ONLY=%s). Switch ASSET_CLASS=equities to activate.",
+            "Research configured (%s) but INACTIVE for asset_class=%s — use equities.",
+            tier_label,
             settings.asset_class,
-            rc.equities_only,
         )
         return
     log.info(
-        "Claude research ACTIVE | advisory mode | model=%s interval=%ds "
-        "require_approval=%s postmortem=%s memory=%s",
-        rc.model,
-        rc.min_interval_seconds,
+        "Research ACTIVE | mode=%s | tiers=%s | brief=%s | require_approval=%s",
+        rc.tier_mode,
+        tier_label,
+        rc.brief_file,
         rc.require_approval_for_entry,
-        rc.postmortem_enabled,
-        rc.memory_file,
     )
 
 
 def build_research_stack(settings: Settings) -> tuple[object | None, object | None, object | None]:
-    """Build advisor + memory + evaluation only when ENABLE_CLAUDE=true."""
+    """Build advisor + memory + evaluation when any research tier is enabled."""
     if not settings.research.enabled:
         return None, None, None
-    client = build_research_client(settings)
+    pm_client = build_postmortem_client(settings)
     return (
-        build_research_advisor(settings, client=client),
-        build_research_memory(settings, client=client),
+        build_research_advisor(settings),
+        build_research_memory(settings, client=pm_client),
         build_research_evaluation(settings),
     )
 
@@ -264,12 +273,14 @@ def build_orchestrator(
         bar_limit=settings.runtime.bar_limit,
         max_entries_per_symbol_per_day=settings.risk.max_entries_per_symbol_per_day,
         fallback_stop_pct=settings.strategy.stop_loss_pct,
+        trading_capital=settings.risk.trading_capital or None,
         watchlist=screener.select if screener is not None else None,
         session_is_open=make_session_guard(settings.asset_class),
         research_advisor=research_advisor,  # type: ignore[arg-type]
         research_memory=research_memory,  # type: ignore[arg-type]
         research_evaluation=research_evaluation,  # type: ignore[arg-type]
         journal_path=settings.runtime.journal_db,
+        research_brief_file=settings.research.brief_file,
     )
 
 
@@ -321,14 +332,32 @@ class _CountingExecution:
         return self._inner.close_position(symbol, now=now)
 
 
-def describe_risk_limits(limits: RiskLimits) -> list[str]:
-    return [
+def describe_risk_limits(limits: RiskLimits, *, trading_capital: float = 0.0) -> list[str]:
+    lines = [
         f"R1 max risk / trade:   {limits.max_risk_per_trade_pct:.1%}",
         f"R2 max open risk:      {limits.max_total_open_risk_pct:.1%}",
         f"R3 daily loss limit:   {limits.daily_loss_limit_pct:.1%}",
         f"R4 drawdown breaker:   {limits.max_drawdown_pct:.1%}",
         f"max concurrent posns:  {limits.max_concurrent_positions}",
+        f"max notional / trade:  {limits.max_notional_pct:.0%} of equity",
     ]
+    if trading_capital > 0:
+        eq = trading_capital
+        lines.append(f"trading capital (virtual): ${eq:,.0f}")
+        lines.append(
+            f"  -> max $ at risk/trade: ${eq * limits.max_risk_per_trade_pct:,.0f}"
+        )
+        lines.append(
+            f"  -> max position size:   ${eq * limits.max_notional_pct:,.0f}"
+        )
+        lines.append(
+            f"  -> daily loss halt:     ${eq * limits.daily_loss_limit_pct:,.0f}"
+        )
+        lines.append(
+            f"  -> drawdown halt:       ${eq * (1 - limits.max_drawdown_pct):,.0f} "
+            f"({limits.max_drawdown_pct:.0%} from peak)"
+        )
+    return lines
 
 
 def run_health_checks(settings: Settings, providers: Providers) -> bool:
@@ -373,7 +402,9 @@ def run_health_checks(settings: Settings, providers: Providers) -> bool:
         ok = False
 
     log.info("[OK]   Risk limits loaded:")
-    for line in describe_risk_limits(settings.risk.to_limits()):
+    for line in describe_risk_limits(
+        settings.risk.to_limits(), trading_capital=settings.risk.trading_capital
+    ):
         log.info("           %s", line)
 
     log.info("=== Health checks %s ===", "PASSED" if ok else "FAILED")

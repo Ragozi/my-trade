@@ -39,6 +39,7 @@ def default_limits() -> RiskLimits:
         daily_loss_limit_pct=0.05,
         max_drawdown_pct=0.15,
         max_concurrent_positions=1,
+        max_notional_pct=0.25,
     )
 
 
@@ -59,19 +60,30 @@ def healthy_account(**overrides: float | int) -> AccountState:
 # R1 — risk-based position sizing
 # --------------------------------------------------------------------------- #
 class TestPositionSizing:
-    def test_risk_dollars_is_two_percent_of_equity(self) -> None:
-        s = position_size(EQUITY, ENTRY, STOP, default_limits())
+    def test_notional_capped_at_max_notional_pct(self) -> None:
+        """Tight stops must not exceed max_notional_pct of equity (NVDA-class bug)."""
+        entry = 192.0
+        stop = entry * (1 - 0.0065)
+        s = position_size(15_000.0, entry, stop, default_limits())
+        assert s.notional <= 15_000.0 * 0.25 + 1e-6
+        assert s.qty == pytest.approx((15_000.0 * 0.25) / entry)
+
+    def test_risk_dollars_is_two_percent_when_not_capped(self) -> None:
+        entry = 50.0
+        stop = 45.0  # wide enough stop that 25% notional cap is not binding
+        s = position_size(EQUITY, entry, stop, default_limits())
         assert s.risk_dollars == pytest.approx(240.0)
 
-    def test_qty_makes_stop_loss_equal_risk_budget(self) -> None:
-        s = position_size(EQUITY, ENTRY, STOP, default_limits())
-        # (entry - stop) * qty must equal the risk budget (~$240)
-        assert (ENTRY - STOP) * s.qty == pytest.approx(240.0)
-        assert s.qty == pytest.approx(240.0 / 650.0)
+    def test_qty_makes_stop_loss_equal_risk_budget_when_not_capped(self) -> None:
+        entry = 50.0
+        stop = 45.0
+        s = position_size(EQUITY, entry, stop, default_limits())
+        assert (entry - stop) * s.qty == pytest.approx(240.0)
 
-    def test_notional_is_qty_times_entry(self) -> None:
+    def test_high_price_entry_is_notional_capped(self) -> None:
         s = position_size(EQUITY, ENTRY, STOP, default_limits())
-        assert s.notional == pytest.approx(s.qty * ENTRY)
+        assert s.notional == pytest.approx(EQUITY * 0.25)
+        assert s.qty == pytest.approx((EQUITY * 0.25) / ENTRY)
 
     def test_invalid_stop_at_or_above_entry_raises(self) -> None:
         with pytest.raises(ValueError):
@@ -106,8 +118,8 @@ class TestAtrStop:
     def test_atr_derived_stop_feeds_sizing(self) -> None:
         stop = atr_stop_price(ENTRY, atr=500.0, multiplier=1.5)  # 99_250 -> $750 dist
         s = position_size(EQUITY, ENTRY, stop, default_limits())
-        assert s.risk_dollars == pytest.approx(240.0)
-        assert (ENTRY - stop) * s.qty == pytest.approx(240.0)
+        assert s.notional == pytest.approx(EQUITY * 0.25)
+        assert s.qty == pytest.approx((EQUITY * 0.25) / ENTRY)
 
     def test_non_positive_atr_raises(self) -> None:
         with pytest.raises(ValueError):
@@ -167,7 +179,7 @@ class TestCircuitBreaker:
 # --------------------------------------------------------------------------- #
 class TestEvaluateTrade:
     def test_happy_path_approves_with_sizing(self) -> None:
-        req = TradeRequest("BTC/USD", ENTRY, STOP)
+        req = TradeRequest("BTC/USD", 50.0, 45.0)
         d = evaluate_trade(healthy_account(), req, default_limits())
         assert d.approved is True
         assert d.reason is RejectReason.OK
@@ -193,15 +205,16 @@ class TestEvaluateTrade:
         assert d.reason is RejectReason.MAX_POSITIONS
 
     def test_open_risk_cap_blocks_when_new_trade_would_exceed_7pct(self) -> None:
-        # Existing open risk $700 + new $240 = $940 > $840 cap.
+        # Existing open risk $780 + capped new ~$90 = $870 > $840 cap.
         limits = RiskLimits(
             max_risk_per_trade_pct=0.02,
             max_total_open_risk_pct=0.07,
             daily_loss_limit_pct=0.05,
             max_drawdown_pct=0.15,
-            max_concurrent_positions=5,  # raise so open-risk is the binding constraint
+            max_concurrent_positions=5,
+            max_notional_pct=0.25,
         )
-        acct = healthy_account(open_positions=1, open_risk_dollars=700.0)
+        acct = healthy_account(open_positions=1, open_risk_dollars=825.0)
         d = evaluate_trade(acct, TradeRequest("BTC/USD", ENTRY, STOP), limits)
         assert d.approved is False
         assert d.reason is RejectReason.MAX_OPEN_RISK

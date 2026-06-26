@@ -109,7 +109,9 @@ class ClaudeResearchClient:
         text = self._call_messages(user_prompt)
         latency_ms = (time.perf_counter() - started) * 1000.0
         raw = extract_json_object(text)
-        return _parse_proposal(raw, model=self._model, latency_ms=latency_ms)
+        return _parse_proposal(raw, model=self._model, latency_ms=latency_ms).model_copy(
+            update={"provider": "claude"}
+        )
 
     def reflect_on_close(
         self,
@@ -191,6 +193,7 @@ class MockClaudeResearchClient:
             ideas=self._ideas[:max_ideas],
             summary="Mock research proposal",
             model="mock-claude",
+            provider="mock",
             latency_ms=1.0,
         )
 

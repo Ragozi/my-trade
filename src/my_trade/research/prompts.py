@@ -85,13 +85,15 @@ def build_user_prompt(context: ResearchContext, *, max_ideas: int) -> str:
         "recent_performance": performance,
         "portfolio_snapshot": portfolio,
         "claude_vs_strategy": comparison,
+        "daily_brief": context.daily_brief,
         "max_ideas": max_ideas,
     }
     return (
         "Analyze the following portfolio context and propose up to "
         f"{max_ideas} trade ideas.\n\n"
-        "Use recent_reflections, recent_performance, portfolio_snapshot, and "
-        "claude_vs_strategy to adjust your suggestions.\n\n"
+        "Use daily_brief (pre-digested journal stats), recent_reflections, "
+        "recent_performance, portfolio_snapshot, and claude_vs_strategy "
+        "to adjust your suggestions.\n\n"
         f"Context JSON:\n{json.dumps(payload, indent=2, default=str)}\n\n"
         f"Return JSON matching this schema:\n{json.dumps(RESPONSE_SCHEMA, indent=2)}"
     )

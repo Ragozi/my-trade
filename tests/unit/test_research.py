@@ -230,7 +230,79 @@ def test_settings_loads_enable_claude() -> None:
         }
     )
     assert s.research.enabled is True
+    assert s.research.claude_enabled is True
     assert s.research.api_key == "test-key"
+
+
+def test_settings_loads_openai_workhorse() -> None:
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "true",
+            "ENABLE_CLAUDE": "false",
+            "RESEARCH_WORKHORSE_PROVIDER": "openai",
+            "OPENAI_API_KEY": "sk-test",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    assert s.research.enabled is True
+    assert s.research.claude_enabled is False
+    assert s.research.workhorse.provider == "openai"
+    s.validate_for_trading()
+
+
+def test_validate_requires_openai_key_when_workhorse_openai() -> None:
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "true",
+            "RESEARCH_WORKHORSE_PROVIDER": "openai",
+            "OPENAI_API_KEY": "",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        s.validate_for_trading()
+
+
+def test_premium_fallback_when_claude_off() -> None:
+    from my_trade.research.factory import build_research_advisor
+
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "true",
+            "ENABLE_CLAUDE": "false",
+            "RESEARCH_WORKHORSE_PROVIDER": "openai",
+            "RESEARCH_PREMIUM_PROVIDER": "xai",
+            "OPENAI_API_KEY": "sk-test",
+            "XAI_API_KEY": "xai-test",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    assert s.research.premium_active is True
+    advisor = build_research_advisor(s)
+    assert advisor is not None
+    from my_trade.research.composite import CompositeResearchAdvisor
+    from my_trade.research.models import ClaudeProposal
+
+    assert isinstance(advisor, CompositeResearchAdvisor)
+    assert [t[0] for t in advisor._tiers] == ["premium", "openai"]
+    assert advisor.allows_entry("AAPL", ClaudeProposal()) is True
+
+
+def test_build_research_brief_from_empty_journal(tmp_path) -> None:
+    from my_trade.research.brief import build_research_brief, save_brief
+
+    db = tmp_path / "journal.db"
+    brief = build_research_brief(journal_path=db, lookback_hours=24)
+    assert "generated_at" in brief
+    assert brief["event_counts"] == {}
+    out = save_brief(tmp_path / "brief.json", brief)
+    assert out.exists()
 
 
 def test_validate_requires_anthropic_key_when_claude_enabled() -> None:

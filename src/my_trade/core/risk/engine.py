@@ -57,7 +57,12 @@ def position_size(
 
     risk_dollars = equity * limits.max_risk_per_trade_pct
     qty = risk_dollars / stop_distance
+    # Cap notional so one trade cannot deploy more than max_notional_pct of equity.
+    max_notional = equity * limits.max_notional_pct
+    max_qty = max_notional / entry_price
+    qty = min(qty, max_qty)
     notional = qty * entry_price
+    risk_dollars = qty * stop_distance
     return SizingResult(qty=qty, risk_dollars=risk_dollars, notional=notional)
 
 

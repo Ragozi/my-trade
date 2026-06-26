@@ -76,6 +76,8 @@ export default function Dashboard() {
 
   const dayPnl = account?.day_pnl ?? stats?.latest_equity?.day_pnl ?? 0;
   const equity = account?.equity ?? stats?.latest_equity?.equity ?? 0;
+  const tradingCapital = account?.trading_capital ?? null;
+  const brokerEquity = account?.broker_equity ?? null;
   const dayPnlPct = equity ? (dayPnl / Math.max(equity - dayPnl, 1)) * 100 : 0;
 
   const equityCurve = useMemo(() => {
@@ -172,6 +174,18 @@ export default function Dashboard() {
 
       <LiveBanner />
 
+      {tradingCapital != null && tradingCapital > 0 && (
+        <div className="mb-4 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-data text-primary">
+          Slow &amp; steady mode · virtual capital {fmtUsd(tradingCapital)}
+          {brokerEquity != null && (
+            <span className="text-muted-foreground">
+              {" "}
+              · Alpaca paper {fmtUsd(brokerEquity)}
+            </span>
+          )}
+        </div>
+      )}
+
       {status?.research?.enabled && (
         <div
           className={cn(
@@ -181,11 +195,19 @@ export default function Dashboard() {
               : "border-accent-orange/40 bg-accent-orange/5 text-accent-orange",
           )}
         >
-          Claude research{" "}
+          Research{" "}
           {status.research.active ? "ACTIVE (advisory)" : "ENABLED but inactive"}
-          {status.research.active && status.research.model
-            ? ` · ${status.research.model}`
-            : ""}
+          {status.research.active && (
+            <>
+              {status.research.tier_mode ? ` · ${status.research.tier_mode}` : ""}
+              {status.research.workhorse_provider
+                ? ` · ${status.research.workhorse_provider}${status.research.workhorse_model ? `/${status.research.workhorse_model}` : ""}`
+                : ""}
+              {status.research.claude_enabled && status.research.claude_model
+                ? ` · claude/${status.research.claude_model}`
+                : ""}
+            </>
+          )}
           {!status.research.active && status.session?.asset_class !== "equities"
             ? " — switch ASSET_CLASS=equities to activate"
             : ""}
@@ -195,8 +217,13 @@ export default function Dashboard() {
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
         <KpiCard
-          label="Equity"
+          label={tradingCapital ? "Trading equity" : "Equity"}
           value={fmtUsd(equity)}
+          sub={
+            tradingCapital && brokerEquity
+              ? `Paper ${fmtUsd(brokerEquity)}`
+              : undefined
+          }
           icon={<CircleDollarSign className="h-4 w-4 text-primary" />}
           tone="primary"
         />
@@ -307,7 +334,7 @@ export default function Dashboard() {
               <MiniStat label="Entries" value={stats?.today?.entries ?? 0} tone="green" />
               <MiniStat label="Exits" value={stats?.today?.exits ?? 0} tone="red" />
               <MiniStat
-                label="Claude ideas"
+                label="Research ideas"
                 value={stats?.today?.research_proposals ?? 0}
                 tone="green"
               />

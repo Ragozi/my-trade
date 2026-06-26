@@ -11,6 +11,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from my_trade.core.execution import (
     BrokerError,
@@ -269,6 +270,21 @@ class TestBuildAccountState:
         acct = build_account_state(snap, state, fallback_stop_pct=0.0065)
         expected_stop = 100_000.0 * (1 - 0.0065)
         assert acct.open_risk_dollars == (100_000.0 - expected_stop) * 0.5
+
+    def test_trading_capital_scales_equity_and_pnl(self) -> None:
+        state = DailyState(
+            trading_day=TODAY,
+            start_of_day_equity=15_000.0,
+            peak_equity=15_000.0,
+            broker_sod_equity=94_868.0,
+        )
+        snap = snapshot(equity=93_868.0)  # -$1000 broker day
+        acct = build_account_state(
+            snap, state, fallback_stop_pct=0.0065, trading_capital=15_000.0
+        )
+        assert acct.equity == pytest.approx(15_000.0 - 1000 * (15_000 / 94_868))
+        assert acct.start_of_day_equity == 15_000.0
+        assert acct.realized_day_pnl == pytest.approx(acct.equity - 15_000.0)
 
 
 # --------------------------------------------------------------------------- #

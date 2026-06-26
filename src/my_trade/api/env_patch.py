@@ -34,6 +34,8 @@ _PATCH_MAP: dict[tuple[str, ...], str] = {
     ("risk", "daily_loss_limit_pct"): "DAILY_LOSS_LIMIT_PCT",
     ("risk", "max_drawdown_pct"): "MAX_DRAWDOWN_PCT",
     ("risk", "max_concurrent_positions"): "MAX_OPEN_POSITIONS",
+    ("risk", "trading_capital"): "TRADING_CAPITAL",
+    ("risk", "max_notional_pct"): "MAX_NOTIONAL_PCT",
     ("runtime", "scan_interval_seconds"): "SCAN_INTERVAL_SECONDS",
 }
 

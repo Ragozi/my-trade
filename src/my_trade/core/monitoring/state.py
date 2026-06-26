@@ -34,6 +34,8 @@ class DailyState:
     entries_today: dict[str, int] = field(default_factory=dict)
     position_stops: dict[str, float] = field(default_factory=dict)
     entry_times: dict[str, str] = field(default_factory=dict)
+    halt_lesson_logged: bool = False
+    broker_sod_equity: float = 0.0
 
     @classmethod
     def empty(cls) -> DailyState:
@@ -44,7 +46,34 @@ class DailyState:
         return self.entries_today.get(normalize_symbol(symbol), 0)
 
 
-def rollover_if_new_day(state: DailyState, today: date, equity: float) -> DailyState:
+def resolve_risk_equity(
+    broker_equity: float,
+    state: DailyState,
+    *,
+    trading_capital: float | None,
+) -> tuple[float, float, float]:
+    """Map broker equity to the balance used for sizing and halt checks.
+
+    Returns ``(risk_equity, day_pnl, start_of_day_equity)``.
+    When ``trading_capital`` is set, day P&L is scaled proportionally from the
+    broker account so a 10% paper loss ≈ 10% virtual loss on ``trading_capital``.
+    """
+    if trading_capital and trading_capital > 0 and state.broker_sod_equity > 0:
+        scale = trading_capital / state.broker_sod_equity
+        day_pnl = (broker_equity - state.broker_sod_equity) * scale
+        risk_equity = trading_capital + day_pnl
+        return risk_equity, day_pnl, trading_capital
+    start = state.start_of_day_equity if state.start_of_day_equity > 0 else broker_equity
+    return broker_equity, broker_equity - start, start
+
+
+def rollover_if_new_day(
+    state: DailyState,
+    today: date,
+    broker_equity: float,
+    *,
+    trading_capital: float | None = None,
+) -> DailyState:
     """Reset daily counters when the trading day changes.
 
     Start-of-day equity is recaptured; the all-time peak is carried forward (the
@@ -52,13 +81,17 @@ def rollover_if_new_day(state: DailyState, today: date, equity: float) -> DailyS
     """
     if state.trading_day == today:
         return state
+    risk_sod = trading_capital if trading_capital and trading_capital > 0 else broker_equity
+    prior_peak = state.peak_equity if state.peak_equity > 0 else risk_sod
     return DailyState(
         trading_day=today,
-        start_of_day_equity=equity,
-        peak_equity=max(state.peak_equity, equity),
+        start_of_day_equity=risk_sod,
+        peak_equity=max(prior_peak, risk_sod),
+        broker_sod_equity=broker_equity,
         entries_today={},
         position_stops={},
         entry_times={},
+        halt_lesson_logged=False,
     )
 
 
@@ -66,6 +99,10 @@ def update_peak(state: DailyState, equity: float) -> DailyState:
     if equity <= state.peak_equity:
         return state
     return replace(state, peak_equity=equity)
+
+
+def mark_halt_lesson_logged(state: DailyState) -> DailyState:
+    return replace(state, halt_lesson_logged=True)
 
 
 def record_entry(
@@ -104,6 +141,8 @@ def build_account_state(
     snapshot: AccountSnapshot,
     state: DailyState,
     fallback_stop_pct: float,
+    *,
+    trading_capital: float | None = None,
 ) -> AccountState:
     """Assemble the risk engine's ``AccountState`` from live + persisted data.
 
@@ -111,9 +150,11 @@ def build_account_state(
     position opened outside this process) it falls back to a conservative
     ``fallback_stop_pct`` of the entry price.
     """
-    equity = snapshot.equity
-    start_of_day = state.start_of_day_equity if state.start_of_day_equity > 0 else equity
-    day_pnl = equity - start_of_day
+    equity, day_pnl, start_of_day = resolve_risk_equity(
+        snapshot.equity,
+        state,
+        trading_capital=trading_capital,
+    )
     peak = max(state.peak_equity, equity)
 
     open_risk = 0.0

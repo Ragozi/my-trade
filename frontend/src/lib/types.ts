@@ -11,6 +11,8 @@ export type EventKind =
   | "error"
   | "heartbeat"
   | "daily_rollover"
+  | "research_not_approved"
+  | "research_reflection"
   | string;
 
 export interface Health {
@@ -35,6 +37,11 @@ export interface Status {
     enabled: boolean;
     active: boolean;
     require_approval: boolean;
+    tier_mode?: string;
+    claude_enabled?: boolean;
+    claude_model?: string | null;
+    workhorse_provider?: string | null;
+    workhorse_model?: string | null;
     model: string | null;
   };
 }
@@ -49,6 +56,8 @@ export interface Position {
 
 export interface Account {
   equity: number;
+  broker_equity?: number | null;
+  trading_capital?: number | null;
   cash: number;
   buying_power: number;
   day_pnl: number;
@@ -73,6 +82,8 @@ export interface RiskConfig {
   daily_loss_limit_pct: number;
   max_drawdown_pct: number;
   max_concurrent_positions: number;
+  trading_capital?: number;
+  max_notional_pct?: number;
 }
 
 export interface ScreenerConfig {

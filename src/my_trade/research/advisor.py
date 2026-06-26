@@ -20,6 +20,8 @@ class ResearchConfig:
     min_confidence: float = 0.55
     max_ideas_per_cycle: int = 5
     require_approval_for_entry: bool = False
+    block_avoid_for_entry: bool = True
+    block_hold_for_entry: bool = True
     equities_only: bool = True
     market_hours_only: bool = True
     billing_cooldown_seconds: int = 3600
@@ -86,7 +88,7 @@ class ResearchAdvisor:
             return ResearchResult(proposal=proposal, called_api=True)
         except Exception as exc:
             msg = str(exc)
-            if "credit balance" in msg.lower() or "billing" in msg.lower():
+            if "credit balance" in msg.lower() or "billing" in msg.lower() or "insufficient_quota" in msg.lower():
                 self._limiter.record_billing_failure(
                     when, cooldown_seconds=self._config.billing_cooldown_seconds
                 )
@@ -113,8 +115,25 @@ class ResearchAdvisor:
 
     def allows_entry(self, symbol: str, proposal: ClaudeProposal) -> bool:
         """Whether deterministic entry may proceed for this symbol."""
-        if not self._config.require_approval_for_entry:
-            return True
-        if proposal.skipped:
-            return False
-        return symbol.upper() in self.approved_symbols(proposal)
+        from my_trade.research.gating import allows_entry_with_gates
+
+        return allows_entry_with_gates(
+            proposal,
+            symbol,
+            min_confidence=self._config.min_confidence,
+            block_avoid=self._config.block_avoid_for_entry,
+            block_hold=self._config.block_hold_for_entry,
+            require_long_approval=self._config.require_approval_for_entry,
+        )
+
+    def entry_veto_reason(self, symbol: str, proposal: ClaudeProposal) -> str | None:
+        from my_trade.research.gating import research_veto_reason
+
+        return research_veto_reason(
+            proposal,
+            symbol,
+            min_confidence=self._config.min_confidence,
+            block_avoid=self._config.block_avoid_for_entry,
+            block_hold=self._config.block_hold_for_entry,
+            require_long_approval=self._config.require_approval_for_entry,
+        )

@@ -47,6 +47,8 @@ def settings_to_config(settings: Settings) -> dict[str, Any]:
             "daily_loss_limit_pct": settings.risk.daily_loss_limit_pct,
             "max_drawdown_pct": settings.risk.max_drawdown_pct,
             "max_concurrent_positions": settings.risk.max_concurrent_positions,
+            "trading_capital": settings.risk.trading_capital,
+            "max_notional_pct": settings.risk.max_notional_pct,
         },
         "runtime": {
             "scan_interval_seconds": settings.runtime.scan_interval_seconds,

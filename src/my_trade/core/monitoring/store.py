@@ -37,6 +37,8 @@ class DailyStateStore:
                     str(k): float(v) for k, v in raw.get("position_stops", {}).items()
                 },
                 entry_times={str(k): str(v) for k, v in raw.get("entry_times", {}).items()},
+                halt_lesson_logged=bool(raw.get("halt_lesson_logged", False)),
+                broker_sod_equity=float(raw.get("broker_sod_equity", 0.0)),
             )
         except (ValueError, KeyError, TypeError, OSError):
             return None
@@ -50,7 +52,18 @@ class DailyStateStore:
             "entries_today": dict(state.entries_today),
             "position_stops": dict(state.position_stops),
             "entry_times": dict(state.entry_times),
+            "halt_lesson_logged": state.halt_lesson_logged,
+            "broker_sod_equity": state.broker_sod_equity,
         }
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(self._path)
+        for attempt in range(5):
+            try:
+                tmp.replace(self._path)
+                return
+            except OSError:
+                if attempt == 4:
+                    raise
+                import time
+
+                time.sleep(0.05 * (attempt + 1))

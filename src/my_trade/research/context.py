@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 
 from my_trade.core.monitoring.account import AccountSnapshot
+from typing import Any
+
 from my_trade.research.models import (
     ClosedTradeReflection,
     ComparisonSummary,
@@ -31,6 +33,7 @@ def build_research_context(
     performance: PerformanceSummary | None = None,
     portfolio: PortfolioSnapshot | None = None,
     comparison_summary: ComparisonSummary | None = None,
+    daily_brief: dict[str, Any] | None = None,
 ) -> ResearchContext:
     open_positions = tuple(
         OpenPositionSummary(
@@ -62,4 +65,5 @@ def build_research_context(
         performance=performance,
         portfolio=portfolio,
         comparison_summary=comparison_summary,
+        daily_brief=daily_brief,
     )

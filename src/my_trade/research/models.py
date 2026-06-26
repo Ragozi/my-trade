@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -114,6 +114,7 @@ class ResearchContext(BaseModel):
     performance: PerformanceSummary | None = None
     portfolio: PortfolioSnapshot | None = None
     comparison_summary: ComparisonSummary | None = None
+    daily_brief: dict[str, Any] | None = None
 
     @field_validator("candidate_symbols", mode="before")
     @classmethod
@@ -151,6 +152,7 @@ class ClaudeProposal(BaseModel):
     ideas: tuple[TradeIdea, ...] = ()
     summary: str = ""
     model: str = ""
+    provider: str = ""
     skipped: bool = False
     skip_reason: str = ""
     latency_ms: float | None = None

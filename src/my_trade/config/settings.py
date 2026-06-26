@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from my_trade.core.risk import RiskLimits
 from my_trade.core.screening import (
@@ -49,6 +49,9 @@ class RiskSettings:
     max_drawdown_pct: float = 0.15            # R4
     max_concurrent_positions: int = 1
     max_entries_per_symbol_per_day: int = 10
+    # When set, size and halt on this virtual balance (paper equity may be much larger).
+    trading_capital: float = 0.0
+    max_notional_pct: float = 0.25  # max single-position notional vs risk equity
 
     def to_limits(self) -> RiskLimits:
         """Project into the engine's ``RiskLimits`` contract."""
@@ -58,6 +61,7 @@ class RiskSettings:
             daily_loss_limit_pct=self.daily_loss_limit_pct,
             max_drawdown_pct=self.max_drawdown_pct,
             max_concurrent_positions=self.max_concurrent_positions,
+            max_notional_pct=self.max_notional_pct,
         )
 
     def validate(self) -> None:
@@ -76,6 +80,14 @@ class RiskSettings:
             raise ValueError("max_concurrent_positions must be >= 1")
         if self.max_entries_per_symbol_per_day < 1:
             raise ValueError("max_entries_per_symbol_per_day must be >= 1")
+        if self.trading_capital < 0:
+            raise ValueError("trading_capital must be >= 0 (0 = use full broker equity)")
+        if 0 < self.trading_capital < 500:
+            raise ValueError("trading_capital must be at least $500 when enabled")
+        if not 0.0 < self.max_notional_pct <= 1.0:
+            raise ValueError("max_notional_pct must be in (0, 1]")
+        if self.max_notional_pct > 0.50:
+            raise ValueError("max_notional_pct above 50% is not allowed for small accounts")
 
 
 @dataclass(frozen=True)
@@ -170,12 +182,53 @@ class RuntimeSettings:
 
 
 @dataclass(frozen=True)
+class WorkhorseSettings:
+    """Cheaper/frequent research tier (OpenAI or xAI Grok)."""
+
+    provider: str = "none"  # none | openai | xai
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    xai_api_key: str = ""
+    xai_model: str = "grok-2-1212"
+    min_interval_seconds: int = 900
+    max_calls_per_day: int = 16
+    max_tokens: int = 2048
+    timeout_seconds: float = 60.0
+
+    @property
+    def is_active(self) -> bool:
+        return self.provider not in ("", "none")
+
+
+@dataclass(frozen=True)
+class PremiumSettings:
+    """Sparse deep-analysis tier (xAI Grok or GPT-4o) when Claude is off."""
+
+    provider: str = "none"  # none | openai | xai
+    openai_model: str = "gpt-4o"
+    xai_model: str = "grok-2-1212"
+    min_interval_seconds: int = 1800
+    max_calls_per_day: int = 4
+    max_tokens: int = 2048
+    timeout_seconds: float = 90.0
+
+    @property
+    def is_active(self) -> bool:
+        return self.provider not in ("", "none")
+
+
+@dataclass(frozen=True)
 class ResearchSettings:
-    """Claude research layer knobs (advisory only)."""
+    """Multi-provider research layer knobs (advisory only)."""
 
     enabled: bool = False
+    claude_enabled: bool = False
+    tier_mode: str = "both"  # workhorse_only | claude_only | both
     api_key: str = ""
     model: str = "claude-sonnet-4-20250514"
+    workhorse: WorkhorseSettings = field(default_factory=WorkhorseSettings)
+    premium: PremiumSettings = field(default_factory=PremiumSettings)
+    brief_file: str = "logs/research_brief.json"
     max_tokens: int = 4096
     timeout_seconds: float = 60.0
     max_ideas_per_cycle: int = 5
@@ -183,6 +236,8 @@ class ResearchSettings:
     min_interval_seconds: int = 300
     max_calls_per_day: int = 100
     require_approval_for_entry: bool = False
+    block_avoid_for_entry: bool = True
+    block_hold_for_entry: bool = True
     equities_only: bool = True
     memory_file: str = "logs/research_memory.json"
     memory_max_reflections: int = 100
@@ -193,6 +248,15 @@ class ResearchSettings:
     postmortem_max_per_day: int = 1
     market_hours_only: bool = True
     billing_cooldown_seconds: int = 3600
+
+    @property
+    def premium_active(self) -> bool:
+        """Alternate premium tier (Grok/GPT-4o) when Claude billing is off."""
+        return self.premium.is_active and not self.claude_enabled
+
+    @property
+    def any_tier_enabled(self) -> bool:
+        return self.claude_enabled or self.workhorse.is_active or self.premium_active
 
 
 @dataclass(frozen=True)
@@ -232,10 +296,30 @@ class Settings:
             raise ValueError(
                 "Live trading requires PAPER_TRADING=false AND ALLOW_LIVE_TRADING=true"
             )
-        if self.research.enabled and not self.research.api_key:
+        rc = self.research
+        if rc.claude_enabled and not rc.api_key:
             raise ValueError(
                 "ENABLE_CLAUDE=true requires ANTHROPIC_API_KEY in .env"
             )
+        wh = rc.workhorse
+        if wh.provider == "openai" and not wh.openai_api_key:
+            raise ValueError(
+                "RESEARCH_WORKHORSE_PROVIDER=openai requires OPENAI_API_KEY in .env"
+            )
+        if wh.provider == "xai" and not wh.xai_api_key:
+            raise ValueError(
+                "RESEARCH_WORKHORSE_PROVIDER=xai requires XAI_API_KEY in .env"
+            )
+        prem = rc.premium
+        if rc.premium_active:
+            if prem.provider == "openai" and not wh.openai_api_key:
+                raise ValueError(
+                    "RESEARCH_PREMIUM_PROVIDER=openai requires OPENAI_API_KEY in .env"
+                )
+            if prem.provider == "xai" and not wh.xai_api_key:
+                raise ValueError(
+                    "RESEARCH_PREMIUM_PROVIDER=xai requires XAI_API_KEY in .env"
+                )
 
 
 def _load_alpaca(env: Mapping[str, str]) -> AlpacaSettings:
@@ -254,7 +338,9 @@ def _load_risk(env: Mapping[str, str]) -> RiskSettings:
         daily_loss_limit_pct=env_float(env, "DAILY_LOSS_LIMIT_PCT", 0.05),
         max_drawdown_pct=env_float(env, "MAX_DRAWDOWN_PCT", 0.15),
         max_concurrent_positions=env_int(env, "MAX_OPEN_POSITIONS", 1),
-        max_entries_per_symbol_per_day=env_int(env, "MAX_ENTRIES_PER_SYMBOL_PER_DAY", 10),
+        max_entries_per_symbol_per_day=env_int(env, "MAX_ENTRIES_PER_SYMBOL_PER_DAY", 1),
+        trading_capital=env_float(env, "TRADING_CAPITAL", 0.0),
+        max_notional_pct=env_float(env, "MAX_NOTIONAL_PCT", 0.25),
     )
 
 
@@ -328,11 +414,51 @@ def _load_runtime(env: Mapping[str, str]) -> RuntimeSettings:
     )
 
 
+def _load_workhorse(env: Mapping[str, str]) -> WorkhorseSettings:
+    return WorkhorseSettings(
+        provider=env_str(env, "RESEARCH_WORKHORSE_PROVIDER", "none").strip().lower(),
+        openai_api_key=env_str(env, "OPENAI_API_KEY", ""),
+        openai_model=env_str(env, "OPENAI_MODEL", "gpt-4o-mini"),
+        xai_api_key=env_str(env, "XAI_API_KEY", ""),
+        xai_model=env_str(env, "XAI_MODEL", "grok-2-1212"),
+        min_interval_seconds=env_int(env, "RESEARCH_WORKHORSE_INTERVAL_SECONDS", 900),
+        max_calls_per_day=env_int(env, "RESEARCH_WORKHORSE_MAX_CALLS_PER_DAY", 16),
+        max_tokens=env_int(env, "RESEARCH_WORKHORSE_MAX_TOKENS", 2048),
+        timeout_seconds=env_float(env, "RESEARCH_WORKHORSE_TIMEOUT_SECONDS", 60.0),
+    )
+
+
+def _load_premium(env: Mapping[str, str]) -> PremiumSettings:
+    return PremiumSettings(
+        provider=env_str(env, "RESEARCH_PREMIUM_PROVIDER", "none").strip().lower(),
+        openai_model=env_str(env, "RESEARCH_PREMIUM_OPENAI_MODEL", "gpt-4o"),
+        xai_model=env_str(env, "RESEARCH_PREMIUM_XAI_MODEL", "grok-2-1212"),
+        min_interval_seconds=env_int(env, "RESEARCH_PREMIUM_INTERVAL_SECONDS", 1800),
+        max_calls_per_day=env_int(env, "RESEARCH_PREMIUM_MAX_CALLS_PER_DAY", 4),
+        max_tokens=env_int(env, "RESEARCH_PREMIUM_MAX_TOKENS", 2048),
+        timeout_seconds=env_float(env, "RESEARCH_PREMIUM_TIMEOUT_SECONDS", 90.0),
+    )
+
+
 def _load_research(env: Mapping[str, str]) -> ResearchSettings:
+    claude_enabled = env_bool(env, "ENABLE_CLAUDE", False)
+    workhorse = _load_workhorse(env)
+    premium = _load_premium(env)
+    any_tier = (
+        claude_enabled
+        or workhorse.is_active
+        or (premium.is_active and not claude_enabled)
+    )
+    enabled = env_bool(env, "ENABLE_RESEARCH", any_tier) and any_tier
     return ResearchSettings(
-        enabled=env_bool(env, "ENABLE_CLAUDE", False),
+        enabled=enabled,
+        claude_enabled=claude_enabled,
+        tier_mode=env_str(env, "RESEARCH_TIER_MODE", "both").strip().lower(),
         api_key=env_str(env, "ANTHROPIC_API_KEY", ""),
         model=env_str(env, "CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+        workhorse=workhorse,
+        premium=premium,
+        brief_file=env_str(env, "RESEARCH_BRIEF_FILE", "logs/research_brief.json"),
         max_tokens=env_int(env, "CLAUDE_MAX_TOKENS", 4096),
         timeout_seconds=env_float(env, "CLAUDE_TIMEOUT_SECONDS", 60.0),
         max_ideas_per_cycle=env_int(env, "CLAUDE_MAX_IDEAS", 5),
@@ -340,6 +466,8 @@ def _load_research(env: Mapping[str, str]) -> ResearchSettings:
         min_interval_seconds=env_int(env, "CLAUDE_CALL_INTERVAL_SECONDS", 300),
         max_calls_per_day=env_int(env, "CLAUDE_MAX_CALLS_PER_DAY", 100),
         require_approval_for_entry=env_bool(env, "CLAUDE_REQUIRE_APPROVAL", False),
+        block_avoid_for_entry=env_bool(env, "RESEARCH_BLOCK_AVOID", True),
+        block_hold_for_entry=env_bool(env, "RESEARCH_BLOCK_HOLD", True),
         equities_only=env_bool(env, "CLAUDE_EQUITIES_ONLY", True),
         memory_file=env_str(env, "CLAUDE_MEMORY_FILE", "logs/research_memory.json"),
         memory_max_reflections=env_int(env, "CLAUDE_MEMORY_MAX_REFLECTIONS", 100),

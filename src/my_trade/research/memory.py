@@ -11,8 +11,9 @@ from pathlib import Path
 
 from my_trade.observability.journal import Journal
 from my_trade.research.history import (
+    all_closed_trades_from_events,
     compute_performance,
-    pair_trades_from_events,
+    journal_outcome_to_reflection,
 )
 from my_trade.research.models import ClosedTradeReflection, PerformanceSummary, TradeIdea
 from my_trade.research.postmortem import PostMortemGenerator
@@ -64,6 +65,22 @@ class ResearchMemoryStore:
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(self.path)
 
+    def _reflection_key(self, reflection: ClosedTradeReflection) -> str:
+        return (
+            f"{reflection.symbol}:{reflection.closed_at.date().isoformat()}:"
+            f"{reflection.exit_reason}"
+        )
+
+    def _append_reflection(self, reflection: ClosedTradeReflection) -> ClosedTradeReflection | None:
+        key = self._reflection_key(reflection)
+        if key in {self._reflection_key(r) for r in self._reflections}:
+            return None
+        self._reflections.append(reflection)
+        if len(self._reflections) > self.max_reflections:
+            self._reflections = self._reflections[-self.max_reflections :]
+        self._save()
+        return reflection
+
     def note_proposals(self, ideas: Sequence[TradeIdea]) -> None:
         """Cache latest Claude thesis per symbol from the current proposal batch."""
         for idea in ideas:
@@ -92,11 +109,70 @@ class ResearchMemoryStore:
         )
         if self.postmortem is not None:
             reflection = self.postmortem.maybe_enrich(reflection, when=closed_at)
-        self._reflections.append(reflection)
-        if len(self._reflections) > self.max_reflections:
-            self._reflections = self._reflections[-self.max_reflections :]
-        self._save()
-        return reflection
+        return self._append_reflection(reflection) or reflection
+
+    def record_broker_close(
+        self,
+        *,
+        symbol: str,
+        entry_price: float,
+        qty: float,
+        pnl_estimate: float,
+        closed_at: datetime,
+        entry_count: int = 1,
+    ) -> ClosedTradeReflection | None:
+        """Record a loss learned when the broker closed a position we did not exit cleanly."""
+        exit_reason = "broker_close"
+        stacked = f" ({entry_count} entries today)" if entry_count > 1 else ""
+        thesis = self._thesis_by_symbol.get(symbol.upper(), "")
+        reflection = build_reflection(
+            symbol=symbol,
+            exit_reason=exit_reason,
+            entry_price=entry_price,
+            qty=qty,
+            unrealized_pl=pnl_estimate,
+            thesis_at_entry=thesis,
+            closed_at=closed_at,
+        )
+        reflection = reflection.model_copy(
+            update={
+                "summary": (
+                    f"{symbol.upper()} closed at broker (bracket/stop){stacked} "
+                    f"({reflection.outcome}) est P&L ${pnl_estimate:+.2f}. "
+                    f"Thesis did not play out."
+                    + (f" Thesis: {thesis[:120]}." if thesis else "")
+                )
+            }
+        )
+        if self.postmortem is not None:
+            reflection = self.postmortem.maybe_enrich(reflection, when=closed_at)
+        return self._append_reflection(reflection)
+
+    def record_session_halt(
+        self,
+        *,
+        halt_reason: str,
+        day_pnl: float,
+        equity: float,
+        closed_at: datetime,
+    ) -> ClosedTradeReflection | None:
+        """One lesson per halted session — captures day-level loss patterns."""
+        outcome = "loss" if day_pnl < -1.0 else "flat" if abs(day_pnl) <= 1.0 else "win"
+        summary = (
+            f"Session halted ({halt_reason}). Day P&L ${day_pnl:+.2f} on ${equity:,.0f} equity. "
+            "Review recent reflections and journal before next session."
+        )
+        reflection = ClosedTradeReflection(
+            symbol="SESSION",
+            closed_at=closed_at,
+            outcome=outcome,  # type: ignore[arg-type]
+            pnl_estimate=day_pnl,
+            exit_reason=halt_reason,
+            summary=summary,
+        )
+        if self.postmortem is not None:
+            reflection = self.postmortem.maybe_enrich(reflection, when=closed_at)
+        return self._append_reflection(reflection)
 
     def recent_reflections(
         self,
@@ -119,6 +195,39 @@ class ResearchMemoryStore:
             items = [r for r in items if r.symbol in symbols]
         return compute_performance(items, window=self.performance_window)
 
+    def sync_from_journal(
+        self,
+        journal_path: str | Path,
+        *,
+        candidate_symbols: Sequence[str],
+        limit_events: int = 1000,
+    ) -> int:
+        """Import any closed trades from the journal not yet in memory (incl. broker closes)."""
+        sym_set = frozenset(s.upper() for s in candidate_symbols)
+        journal = Journal(journal_path)
+        added = 0
+        try:
+            events = journal.fetch_recent(limit_events)
+            events.reverse()
+            existing = {self._reflection_key(r) for r in self._reflections}
+            for outcome in all_closed_trades_from_events(events, symbols=sym_set):
+                ref = journal_outcome_to_reflection(outcome)
+                key = self._reflection_key(ref)
+                if key in existing:
+                    continue
+                if self.postmortem is not None:
+                    ref = self.postmortem.maybe_enrich(ref, when=ref.closed_at)
+                self._reflections.append(ref)
+                existing.add(key)
+                added += 1
+            if added:
+                if len(self._reflections) > self.max_reflections:
+                    self._reflections = self._reflections[-self.max_reflections :]
+                self._save()
+        finally:
+            journal.close()
+        return added
+
     def enrich_from_journal(
         self,
         journal_path: str | Path,
@@ -126,22 +235,9 @@ class ResearchMemoryStore:
         candidate_symbols: Sequence[str],
         limit_events: int = 500,
     ) -> None:
-        """Backfill memory from journal pairs when the store is empty or sparse."""
-        if len(self._reflections) >= self.performance_window:
-            return
-        sym_set = frozenset(s.upper() for s in candidate_symbols)
-        journal = Journal(journal_path)
-        try:
-            events = journal.fetch_recent(limit_events)
-            events.reverse()
-            from my_trade.research.history import journal_outcome_to_reflection
-
-            for outcome in pair_trades_from_events(events, symbols=sym_set):
-                ref = journal_outcome_to_reflection(outcome)
-                if ref.symbol not in {r.symbol for r in self._reflections}:
-                    self._reflections.append(ref)
-            if len(self._reflections) > self.max_reflections:
-                self._reflections = self._reflections[-self.max_reflections :]
-            self._save()
-        finally:
-            journal.close()
+        """Backfill memory from journal pairs and inferred broker closes."""
+        self.sync_from_journal(
+            journal_path,
+            candidate_symbols=candidate_symbols,
+            limit_events=limit_events,
+        )

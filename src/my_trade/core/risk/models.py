@@ -22,6 +22,7 @@ class RiskLimits:
     daily_loss_limit_pct: float = 0.05     # R3
     max_drawdown_pct: float = 0.15         # R4
     max_concurrent_positions: int = 1
+    max_notional_pct: float = 0.25  # max position value as fraction of equity
 
 
 @dataclass(frozen=True)

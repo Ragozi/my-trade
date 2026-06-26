@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -56,7 +57,7 @@ def classify_outcome(exit_reason: str, pnl_estimate: float | None) -> str:
     reason = exit_reason.lower()
     if reason in ("take_profit", "tp"):
         return "win"
-    if reason in ("stop_loss", "stop"):
+    if reason in ("stop_loss", "stop", "broker_bracket_stop", "broker_close"):
         return "loss"
     if pnl_estimate is not None:
         if pnl_estimate > 1.0:
@@ -66,6 +67,8 @@ def classify_outcome(exit_reason: str, pnl_estimate: float | None) -> str:
         return "flat"
     if reason in ("rsi_overbought", "time_stop"):
         return "flat"
+    if reason.startswith("daily_loss_limit") or reason.startswith("circuit_breaker"):
+        return "loss" if pnl_estimate is not None and pnl_estimate < 0 else "unknown"
     return "unknown"
 
 
@@ -130,6 +133,93 @@ def pair_trades_from_events(
                 )
             )
     return outcomes
+
+
+def _stacked_broker_outcome(
+    sym: str,
+    entries: list[PendingEntry],
+    event: JournalEvent,
+    last_thesis: dict[str, str],
+) -> JournalTradeOutcome:
+    """One inferred close when bracket legs filled but the bot never exit_submitted."""
+    prices = [e.entry_price for e in entries if e.entry_price is not None]
+    avg_entry = sum(prices) / len(prices) if prices else None
+    stacked = len(entries)
+    entry_detail = entries[0].detail if stacked == 1 else (
+        f"{stacked} stacked entries; first={entries[0].detail[:80]}"
+    )
+    return JournalTradeOutcome(
+        symbol=sym,
+        exit_ts=event.ts,
+        exit_reason="broker_bracket_stop",
+        entry_detail=entry_detail,
+        entry_price=avg_entry,
+        equity_at_exit=event.equity,
+        day_pnl_at_exit=event.day_pnl,
+        thesis_at_entry=last_thesis.get(sym, ""),
+    )
+
+
+def infer_broker_closes_from_events(
+    events: Sequence[JournalEvent],
+    *,
+    symbols: frozenset[str] | None = None,
+) -> list[JournalTradeOutcome]:
+    """Infer closes from exit_failed + held_for_orders when exit_submitted never fired."""
+    pending: dict[str, list[PendingEntry]] = defaultdict(list)
+    last_thesis: dict[str, str] = {}
+    outcomes: list[JournalTradeOutcome] = []
+    closed_symbols: set[str] = set()
+
+    for event in sorted(events, key=lambda e: e.ts):
+        sym = event.symbol.upper()
+        if symbols and sym and sym not in symbols:
+            continue
+        if event.kind == "research_proposal" and sym:
+            last_thesis[sym] = parse_research_thesis(event.detail)
+        elif event.kind == "entry_submitted" and sym:
+            pending[sym].append(
+                PendingEntry(
+                    ts=event.ts,
+                    symbol=sym,
+                    detail=event.detail,
+                    entry_price=parse_entry_prices(event.detail),
+                    equity=event.equity,
+                )
+            )
+        elif event.kind == "exit_submitted" and sym:
+            pending.pop(sym, None)
+            closed_symbols.add(sym)
+        elif (
+            event.kind == "exit_failed"
+            and sym
+            and sym not in closed_symbols
+            and "held_for_orders" in event.detail
+            and pending.get(sym)
+        ):
+            entries = pending.pop(sym)
+            outcomes.append(_stacked_broker_outcome(sym, entries, event, last_thesis))
+            closed_symbols.add(sym)
+    return outcomes
+
+
+def all_closed_trades_from_events(
+    events: Sequence[JournalEvent],
+    *,
+    symbols: frozenset[str] | None = None,
+) -> list[JournalTradeOutcome]:
+    """Pair normal exits and infer broker-side closes (deduped by symbol + exit_ts)."""
+    paired = pair_trades_from_events(events, symbols=symbols)
+    inferred = infer_broker_closes_from_events(events, symbols=symbols)
+    seen = {(o.symbol, o.exit_ts) for o in paired}
+    merged = list(paired)
+    for outcome in inferred:
+        key = (outcome.symbol, outcome.exit_ts)
+        if key not in seen:
+            merged.append(outcome)
+            seen.add(key)
+    merged.sort(key=lambda o: o.exit_ts)
+    return merged
 
 
 def journal_outcome_to_reflection(outcome: JournalTradeOutcome) -> ClosedTradeReflection:

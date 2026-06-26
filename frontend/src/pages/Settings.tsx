@@ -22,11 +22,11 @@ import { AlertTriangle, RotateCcw, Save } from "lucide-react";
 import type { AppConfig } from "@/lib/types";
 
 const RISK_BOUNDS = {
-  max_risk_per_trade_pct: { min: 0.5, max: 5 },
-  max_open_risk_pct: { min: 1, max: 15 },
-  daily_loss_limit_pct: { min: 1, max: 10 },
-  max_drawdown_pct: { min: 5, max: 25 },
-  max_concurrent_positions: { min: 1, max: 5 },
+  max_risk_per_trade_pct: { min: 0.005, max: 0.05, step: 0.001, label: "Max risk / trade (fraction)" },
+  max_open_risk_pct: { min: 0.02, max: 0.15, step: 0.01, label: "Max open risk (fraction)" },
+  daily_loss_limit_pct: { min: 0.01, max: 0.1, step: 0.01, label: "Daily loss halt (fraction)" },
+  max_drawdown_pct: { min: 0.05, max: 0.25, step: 0.01, label: "Max drawdown (fraction)" },
+  max_concurrent_positions: { min: 1, max: 5, step: 1, label: "Max positions" },
 };
 
 export default function Settings() {
@@ -223,9 +223,9 @@ export default function Settings() {
             {Object.entries(RISK_BOUNDS).map(([key, b]) => (
               <NumField
                 key={key}
-                label={`${key.split("_").join(" ")} (${b.min}–${b.max})`}
+                label={b.label}
                 value={(draft.risk as any)[key]}
-                step={0.1}
+                step={"step" in b ? b.step : 0.1}
                 onChange={(v) =>
                   setDraft({
                     ...draft,
@@ -234,6 +234,25 @@ export default function Settings() {
                 }
               />
             ))}
+            <NumField
+              label="Trading capital ($ virtual)"
+              value={draft.risk.trading_capital ?? 0}
+              step={500}
+              onChange={(v) =>
+                setDraft({ ...draft, risk: { ...draft.risk, trading_capital: Math.max(0, v) } })
+              }
+            />
+            <NumField
+              label="Max notional / trade (fraction, 0.2 = 20%)"
+              value={draft.risk.max_notional_pct ?? 0.2}
+              step={0.05}
+              onChange={(v) =>
+                setDraft({
+                  ...draft,
+                  risk: { ...draft.risk, max_notional_pct: Math.max(0.05, Math.min(0.5, v)) },
+                })
+              }
+            />
             <div className="col-span-2 pt-2">
               <ConfirmDialog
                 trigger={
