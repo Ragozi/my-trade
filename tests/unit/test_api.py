@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+from fastapi.testclient import TestClient
+
+import my_trade.api.app as api_app
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
 from my_trade.api.serializers import stats_from_events
 from my_trade.config import load_settings
@@ -36,6 +40,75 @@ class TestEnvPatch:
         out = merge_env_lines(text, {"ASSET_CLASS": "equities"})
         assert "ASSET_CLASS=equities" in out
         assert "PAPER_TRADING=true" in out
+
+    def test_rejects_env_value_line_injection(self) -> None:
+        with pytest.raises(ValueError):
+            patch_to_env_updates(
+                {
+                    "risk": {
+                        "max_risk_per_trade_pct": (
+                            "0.02\nALLOW_LIVE_TRADING=true\nPAPER_TRADING=false"
+                        )
+                    }
+                }
+            )
+
+    def test_merge_env_rejects_direct_injection(self) -> None:
+        with pytest.raises(ValueError):
+            merge_env_lines(
+                "MAX_RISK_PER_TRADE_PCT=0.01\n",
+                {"MAX_RISK_PER_TRADE_PCT": "0.02\nALLOW_LIVE_TRADING=true"},
+            )
+
+
+class TestApiSafety:
+    def test_patch_settings_rejects_env_line_injection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(api_app, "load_settings", lambda: load_settings(env={}))
+        client = TestClient(api_app.create_app())
+
+        response = client.patch(
+            "/api/settings",
+            json={
+                "risk": {
+                    "max_risk_per_trade_pct": (
+                        "0.02\nALLOW_LIVE_TRADING=true\nPAPER_TRADING=false"
+                    )
+                }
+            },
+        )
+
+        assert response.status_code == 400
+        assert "cannot be safely written" in response.json()["detail"]
+
+    def test_bot_once_rejects_live_mode_before_cycle(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings = load_settings(
+            env={
+                "APCA_API_KEY_ID": "key",
+                "APCA_API_SECRET_KEY": "secret",
+                "PAPER_TRADING": "false",
+                "ALLOW_LIVE_TRADING": "true",
+            }
+        )
+
+        class Helpers:
+            ALLOW_LIVE = False
+
+            @staticmethod
+            def run_once(_settings: object) -> int:
+                raise AssertionError("run_once must not be called for live settings")
+
+        monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+        monkeypatch.setattr(api_app, "_paper_helpers", lambda: Helpers())
+        client = TestClient(api_app.create_app())
+
+        response = client.post("/api/bot/once")
+
+        assert response.status_code == 400
+        assert "PAPER_TRADING=true" in response.json()["detail"]
 
 
 class TestSerializers:

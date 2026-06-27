@@ -40,6 +40,16 @@ _PATCH_MAP: dict[tuple[str, ...], str] = {
 }
 
 _BLOCKED_KEYS = frozenset({"APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALLOW_LIVE_TRADING"})
+_ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_ENV_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+
+
+def _safe_env_value(key: str, value: str) -> str:
+    if not _ENV_KEY.fullmatch(key):
+        raise ValueError(f"Invalid environment key {key!r}")
+    if "\n" in value or "\r" in value or "=" in value:
+        raise ValueError(f"{key} contains characters that cannot be safely written to .env")
+    return value
 
 
 def _flatten_patch(
@@ -67,12 +77,14 @@ def patch_to_env_updates(patch: Mapping[str, Any]) -> dict[str, str]:
             continue
         if path == ("symbols",):
             # Caller resolves CRYPTO_SYMBOLS vs EQUITY_SYMBOLS using asset_class.
-            updates["_SYMBOLS_LIST"] = ",".join(str(s) for s in value)
+            updates["_SYMBOLS_LIST"] = _safe_env_value(
+                "_SYMBOLS_LIST", ",".join(str(s) for s in value)
+            )
             continue
         if isinstance(value, bool):
             updates[env_key] = "true" if value else "false"
         else:
-            updates[env_key] = str(value)
+            updates[env_key] = _safe_env_value(env_key, str(value))
     return updates
 
 
@@ -85,26 +97,24 @@ def resolve_symbol_key(updates: dict[str, str], asset_class: str) -> dict[str, s
     return out
 
 
-_ENV_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
-
-
 def merge_env_lines(existing: str, updates: Mapping[str, str]) -> str:
     """Return new .env content with ``updates`` applied (add or replace lines)."""
+    safe_updates = {key: _safe_env_value(key, value) for key, value in updates.items()}
     lines = existing.splitlines()
     seen: set[str] = set()
     out: list[str] = []
     for line in lines:
         m = _ENV_LINE.match(line.strip())
-        if m and m.group(1) in updates:
+        if m and m.group(1) in safe_updates:
             key = m.group(1)
             if key in _BLOCKED_KEYS:
                 out.append(line)
                 continue
-            out.append(f"{key}={updates[key]}")
+            out.append(f"{key}={safe_updates[key]}")
             seen.add(key)
         else:
             out.append(line)
-    for key, value in updates.items():
+    for key, value in safe_updates.items():
         if key not in seen and key not in _BLOCKED_KEYS:
             out.append(f"{key}={value}")
     return "\n".join(out) + ("\n" if out else "")
