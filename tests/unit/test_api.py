@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from datetime import date
+from importlib import import_module
 
 import pytest
 from fastapi import HTTPException
 
-import my_trade.api.app as api_app
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
 from my_trade.api.serializers import stats_from_events
 from my_trade.config import load_settings
 from my_trade.core.monitoring.state import DailyState
 from my_trade.observability.journal import JournalEvent
+
+api_app = import_module("my_trade.api.app")
 
 
 class TestEnvPatch:
