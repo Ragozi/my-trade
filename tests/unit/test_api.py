@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from datetime import date
+from importlib import import_module
+
+import pytest
+from fastapi import HTTPException
 
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
 from my_trade.api.serializers import stats_from_events
 from my_trade.config import load_settings
 from my_trade.core.monitoring.state import DailyState
 from my_trade.observability.journal import JournalEvent
+
+api_app = import_module("my_trade.api.app")
 
 
 class TestEnvPatch:
@@ -36,6 +42,46 @@ class TestEnvPatch:
         out = merge_env_lines(text, {"ASSET_CLASS": "equities"})
         assert "ASSET_CLASS=equities" in out
         assert "PAPER_TRADING=true" in out
+
+    def test_rejects_env_value_line_injection(self) -> None:
+        with pytest.raises(ValueError):
+            patch_to_env_updates(
+                {
+                    "risk": {
+                        "max_risk_per_trade_pct": (
+                            "0.02\nALLOW_LIVE_TRADING=true\nPAPER_TRADING=false"
+                        )
+                    }
+                }
+            )
+
+    def test_merge_env_rejects_direct_injection(self) -> None:
+        with pytest.raises(ValueError):
+            merge_env_lines(
+                "MAX_RISK_PER_TRADE_PCT=0.01\n",
+                {"MAX_RISK_PER_TRADE_PCT": "0.02\nALLOW_LIVE_TRADING=true"},
+            )
+
+
+class TestApiSafety:
+    def test_paper_runner_guard_rejects_live_mode(self) -> None:
+        settings = load_settings(
+            env={
+                "APCA_API_KEY_ID": "key",
+                "APCA_API_SECRET_KEY": "secret",
+                "PAPER_TRADING": "false",
+                "ALLOW_LIVE_TRADING": "true",
+            }
+        )
+
+        class Helpers:
+            ALLOW_LIVE = False
+
+        with pytest.raises(HTTPException) as exc:
+            api_app._require_paper_runner_settings(settings, Helpers())
+
+        assert exc.value.status_code == 400
+        assert "PAPER_TRADING=true" in exc.value.detail
 
 
 class TestSerializers:

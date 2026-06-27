@@ -47,6 +47,26 @@ def _paper_helpers() -> Any:
     return pt
 
 
+def _require_paper_runner_settings(settings: Any, paper_helpers: Any | None = None) -> None:
+    """Validate that a request is safe for the paper-only runner."""
+    try:
+        settings.validate_for_trading()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if (
+        getattr(paper_helpers, "ALLOW_LIVE", False)
+        or settings.alpaca.allow_live_trading
+        or not settings.alpaca.paper_trading
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Paper runner requires PAPER_TRADING=true and "
+                "ALLOW_LIVE_TRADING=false"
+            ),
+        )
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="My-Trade API", version="1.0.0")
     app.add_middleware(
@@ -182,7 +202,10 @@ def create_app() -> FastAPI:
     def patch_settings(body: SettingsPatch) -> dict[str, Any]:
         settings = load_settings()
         patch = body.model_dump(exclude_unset=True)
-        updates = patch_to_env_updates(patch)
+        try:
+            updates = patch_to_env_updates(patch)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         asset_class = str(patch.get("asset_class", settings.asset_class))
         updates = resolve_symbol_key(updates, asset_class)
         if not updates:
@@ -289,11 +312,7 @@ def create_app() -> FastAPI:
     def bot_health_check() -> dict[str, Any]:
         pt = _paper_helpers()
         settings = load_settings()
-        try:
-            settings.validate_for_trading()
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        pt.refuse_if_live(settings)
+        _require_paper_runner_settings(settings, pt)
         providers = pt.build_providers(settings)
         ok = pt.run_health_checks(settings, providers)
         return {
@@ -306,6 +325,7 @@ def create_app() -> FastAPI:
     def bot_once() -> dict[str, Any]:
         pt = _paper_helpers()
         settings = load_settings()
+        _require_paper_runner_settings(settings, pt)
         code = pt.run_once(settings)
         bot = get_bot_status(settings.runtime.log_dir)
         return {
@@ -318,10 +338,7 @@ def create_app() -> FastAPI:
     @app.post("/api/bot/start")
     def bot_start() -> dict[str, Any]:
         settings = load_settings()
-        try:
-            settings.validate_for_trading()
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _require_paper_runner_settings(settings)
         ok, message = start_bot(settings.runtime.log_dir)
         return {"ok": ok, "message": message}
 
@@ -335,10 +352,7 @@ def create_app() -> FastAPI:
     def bot_restart() -> dict[str, Any]:
         settings = load_settings()
         stop_bot(settings.runtime.log_dir)
-        try:
-            settings.validate_for_trading()
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _require_paper_runner_settings(settings)
         ok, message = start_bot(settings.runtime.log_dir)
         return {"ok": ok, "message": f"Restarted: {message}"}
 
