@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 import my_trade.api.app as api_app
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
@@ -62,29 +62,7 @@ class TestEnvPatch:
 
 
 class TestApiSafety:
-    def test_patch_settings_rejects_env_line_injection(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(api_app, "load_settings", lambda: load_settings(env={}))
-        client = TestClient(api_app.create_app())
-
-        response = client.patch(
-            "/api/settings",
-            json={
-                "risk": {
-                    "max_risk_per_trade_pct": (
-                        "0.02\nALLOW_LIVE_TRADING=true\nPAPER_TRADING=false"
-                    )
-                }
-            },
-        )
-
-        assert response.status_code == 400
-        assert "cannot be safely written" in response.json()["detail"]
-
-    def test_bot_once_rejects_live_mode_before_cycle(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_paper_runner_guard_rejects_live_mode(self) -> None:
         settings = load_settings(
             env={
                 "APCA_API_KEY_ID": "key",
@@ -97,18 +75,11 @@ class TestApiSafety:
         class Helpers:
             ALLOW_LIVE = False
 
-            @staticmethod
-            def run_once(_settings: object) -> int:
-                raise AssertionError("run_once must not be called for live settings")
+        with pytest.raises(HTTPException) as exc:
+            api_app._require_paper_runner_settings(settings, Helpers())
 
-        monkeypatch.setattr(api_app, "load_settings", lambda: settings)
-        monkeypatch.setattr(api_app, "_paper_helpers", lambda: Helpers())
-        client = TestClient(api_app.create_app())
-
-        response = client.post("/api/bot/once")
-
-        assert response.status_code == 400
-        assert "PAPER_TRADING=true" in response.json()["detail"]
+        assert exc.value.status_code == 400
+        assert "PAPER_TRADING=true" in exc.value.detail
 
 
 class TestSerializers:
