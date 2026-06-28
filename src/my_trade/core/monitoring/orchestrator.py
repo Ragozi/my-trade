@@ -18,8 +18,8 @@ Safety invariants preserved here:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -548,6 +548,7 @@ class TradingOrchestrator:
             if isinstance(research_proposal, ClaudeProposal)
             else None
         )
+        working_account = account_state
         for symbol in self._active_symbols():
             sym = normalize_symbol(symbol)
             if sym not in open_symbols and sym in self._state.position_stops:
@@ -595,10 +596,18 @@ class TradingOrchestrator:
                 continue
 
             outcome = self._execution.execute_entry(
-                EntryIntent.from_signal(signal), account_state, now=when
+                EntryIntent.from_signal(signal), working_account, now=when
             )
             if outcome.submitted:
                 self._persist(record_entry(self._state, symbol, signal.stop_price, when))
+                if outcome.risk_decision is not None and outcome.risk_decision.sizing is not None:
+                    working_account = replace(
+                        working_account,
+                        open_positions=working_account.open_positions + 1,
+                        open_risk_dollars=working_account.open_risk_dollars
+                        + outcome.risk_decision.sizing.risk_dollars,
+                    )
+                open_symbols.add(sym)
                 if self._evaluation is not None:
                     self._evaluation.record_entry(
                         symbol=symbol,
