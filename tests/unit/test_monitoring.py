@@ -122,6 +122,23 @@ class FakeStrategy:
         return self._exit_reason
 
 
+class PerSymbolSignalStrategy(FakeStrategy):
+    def __init__(self) -> None:
+        super().__init__(entry=None)
+
+    def detect_entry(
+        self,
+        symbol: str,
+        df_1m: pd.DataFrame,
+        df_5m: pd.DataFrame,
+        df_15m: pd.DataFrame,
+        now: datetime | None = None,
+    ) -> tuple[Signal | None, ScanEvaluation]:
+        self.entry_calls += 1
+        evaluation = ScanEvaluation(eligible=True, summary="fake", near_signal=False)
+        return signal(symbol=symbol), evaluation
+
+
 class FakeExecutor:
     def __init__(self, submitted: bool = True) -> None:
         self._submitted = submitted
@@ -551,3 +568,29 @@ class TestOrchestrator:
         result = orch.run_cycle(NOW)
         assert any(a.kind is ActionKind.ENTRY_REJECTED for a in result.actions)
         assert broker.submitted == []  # nothing was sent to the broker
+
+    def test_same_cycle_entries_project_pending_risk(self, tmp_path: Path) -> None:
+        # The broker snapshot is taken once at cycle start. After the first
+        # accepted entry, the orchestrator must project that pending position
+        # before evaluating later symbols in the same scan.
+        broker = RecordingBroker()
+        adapter = ExecutionAdapter(
+            broker, limits(max_concurrent_positions=1)  # type: ignore[arg-type]
+        )
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=PerSymbolSignalStrategy(),
+            execution=adapter,
+            account=FakeAccount(snapshot()),  # type: ignore[arg-type]
+            store=DailyStateStore(tmp_path / "s.json"),
+            limits=limits(max_concurrent_positions=1),
+            symbols=(SYMBOL, "ETH/USD"),
+            clock=lambda: NOW,
+        )
+        result = orch.run_cycle(NOW)
+        assert result.entries_submitted == 1
+        assert len(broker.submitted) == 1
+        assert any(
+            a.kind is ActionKind.ENTRY_REJECTED and a.symbol == "ETH/USD"
+            for a in result.actions
+        )
