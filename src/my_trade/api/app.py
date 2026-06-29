@@ -44,6 +44,10 @@ from my_trade.data.stock_data import StockHistoricalDataProvider
 from my_trade.observability import Journal
 
 
+class SettingsPatch(BaseModel):
+    model_config = {"extra": "allow"}
+
+
 # Lazy import for one-shot actions to avoid circular imports at module load.
 def _paper_helpers() -> Any:
     from scripts import paper_trade as pt
@@ -178,9 +182,6 @@ def create_app() -> FastAPI:
     @app.get("/api/config")
     def config() -> dict[str, Any]:
         return settings_to_config(load_settings())
-
-    class SettingsPatch(BaseModel):
-        model_config = {"extra": "allow"}
 
     @app.patch("/api/settings")
     def patch_settings(body: SettingsPatch) -> dict[str, Any]:
