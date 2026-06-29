@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from my_trade.core.risk import RiskLimits
 from my_trade.core.screening import (
@@ -481,20 +482,34 @@ def _load_research(env: Mapping[str, str]) -> ResearchSettings:
     )
 
 
+def default_env_path() -> Path:
+    """Return the repo-root .env path used by local operators and subprocesses."""
+    return Path(__file__).resolve().parents[3] / ".env"
+
+
+def load_environment(env_path: Path | None = None) -> dict[str, str]:
+    """Load process env plus a fresh repo .env overlay without mutating os.environ."""
+    env = dict(os.environ)
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        return env
+
+    path = env_path or default_env_path()
+    for key, value in dotenv_values(path).items():
+        if value is not None:
+            env[key] = value
+    return env
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """Build a validated ``Settings`` from an env mapping.
 
-    When ``env`` is ``None`` we load ``.env`` (best-effort) and read
-    ``os.environ``. Pass an explicit mapping in tests for full determinism.
+    When ``env`` is ``None`` we read ``os.environ`` plus a fresh repo-root
+    ``.env`` overlay. Pass an explicit mapping in tests for full determinism.
     """
     if env is None:
-        try:
-            from dotenv import load_dotenv
-
-            load_dotenv()
-        except ImportError:
-            pass
-        env = os.environ
+        env = load_environment()
 
     asset_class = env_str(env, "ASSET_CLASS", ASSET_CLASS_CRYPTO).strip().lower()
     if asset_class == ASSET_CLASS_EQUITIES:

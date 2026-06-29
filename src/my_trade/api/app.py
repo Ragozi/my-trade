@@ -9,7 +9,6 @@ and exposes state.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -29,7 +28,12 @@ from my_trade.api.serializers import (
     stats_from_events,
     watchlist_to_json,
 )
-from my_trade.config import load_settings
+from my_trade.config import (
+    ASSET_CLASS_CRYPTO,
+    default_env_path,
+    load_environment,
+    load_settings,
+)
 from my_trade.core.market_calendar import make_session_guard
 from my_trade.core.monitoring import DailyStateStore
 from my_trade.core.monitoring.alpaca_account import AlpacaAccountProvider
@@ -180,10 +184,13 @@ def create_app() -> FastAPI:
 
     @app.patch("/api/settings")
     def patch_settings(body: SettingsPatch) -> dict[str, Any]:
-        settings = load_settings()
+        env_path = default_env_path()
         patch = body.model_dump(exclude_unset=True)
+        env = load_environment(env_path)
         updates = patch_to_env_updates(patch)
-        asset_class = str(patch.get("asset_class", settings.asset_class))
+        asset_class = str(
+            patch.get("asset_class", env.get("ASSET_CLASS", ASSET_CLASS_CRYPTO))
+        ).strip().lower()
         updates = resolve_symbol_key(updates, asset_class)
         if not updates:
             return {
@@ -191,9 +198,14 @@ def create_app() -> FastAPI:
                 "requires_restart": False,
                 "message": "No recognized settings fields in patch",
             }
-        env_path = Path(".env")
         if not env_path.exists():
             raise HTTPException(status_code=400, detail=".env file not found")
+        candidate_env = dict(env)
+        candidate_env.update(updates)
+        try:
+            load_settings(env=candidate_env)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         apply_env_patch(env_path, updates)
         return {
             "ok": True,

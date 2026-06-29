@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
+import my_trade.api.app as app_module
+from my_trade.api.app import create_app
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
 from my_trade.api.serializers import stats_from_events
 from my_trade.config import load_settings
@@ -36,6 +42,34 @@ class TestEnvPatch:
         out = merge_env_lines(text, {"ASSET_CLASS": "equities"})
         assert "ASSET_CLASS=equities" in out
         assert "PAPER_TRADING=true" in out
+
+
+class TestSettingsPatchRoute:
+    def _settings_endpoint(self):
+        app = create_app()
+        for route in app.routes:
+            if getattr(route, "path", "") == "/api/settings" and "PATCH" in getattr(
+                route, "methods", ()
+            ):
+                return route.endpoint, route.endpoint.__annotations__["body"]
+        raise AssertionError("/api/settings PATCH route not found")
+
+    def test_rejects_invalid_risk_patch_without_writing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_path = tmp_path / ".env"
+        original = "MAX_RISK_PER_TRADE_PCT=0.02\nMAX_TOTAL_OPEN_RISK_PCT=0.07\n"
+        env_path.write_text(original, encoding="utf-8")
+        monkeypatch.setattr(app_module, "default_env_path", lambda: env_path)
+
+        endpoint, body_cls = self._settings_endpoint()
+        body = body_cls(risk={"trading_capital": 100})
+        with pytest.raises(HTTPException) as excinfo:
+            endpoint(body)
+
+        assert excinfo.value.status_code == 400
+        assert "trading_capital" in str(excinfo.value.detail)
+        assert env_path.read_text(encoding="utf-8") == original
 
 
 class TestSerializers:
