@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+import importlib
 from datetime import date
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 
-import my_trade.api.app as app_module
 from my_trade.api.app import create_app
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
 from my_trade.api.serializers import stats_from_events
 from my_trade.config import load_settings
 from my_trade.core.monitoring.state import DailyState
 from my_trade.observability.journal import JournalEvent
+
+app_module = importlib.import_module("my_trade.api.app")
 
 
 class TestEnvPatch:
