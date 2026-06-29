@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+import my_trade.config.settings as settings_module
 from my_trade.config import (
     DEFAULT_CRYPTO_SYMBOL,
     RiskSettings,
@@ -119,6 +122,19 @@ class TestLoadSettings:
     def test_invalid_risk_value_fails_fast(self) -> None:
         with pytest.raises(ValueError):
             load_settings(env={"MAX_RISK_PER_TRADE_PCT": "2"})  # 200% > 1.0
+
+    def test_env_file_overlays_stale_process_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_path = tmp_path / ".env"
+        env_path.write_text("TRADING_CAPITAL=15000\n", encoding="utf-8")
+        monkeypatch.setenv("TRADING_CAPITAL", "90000")
+        monkeypatch.setattr(settings_module, "default_env_path", lambda: env_path)
+
+        assert load_settings().risk.trading_capital == pytest.approx(15000.0)
+
+        env_path.write_text("TRADING_CAPITAL=20000\n", encoding="utf-8")
+        assert load_settings().risk.trading_capital == pytest.approx(20000.0)
 
     def test_validate_for_trading_requires_keys(self) -> None:
         s = load_settings(env={})
