@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+import importlib
 from datetime import date
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
 
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
 from my_trade.api.serializers import stats_from_events
 from my_trade.config import load_settings
 from my_trade.core.monitoring.state import DailyState
 from my_trade.observability.journal import JournalEvent
+
+
+def _route_endpoint(app, path: str, method: str):
+    for route in app.routes:
+        if getattr(route, "path", None) == path and method in getattr(route, "methods", set()):
+            return route.endpoint
+    raise AssertionError(f"route not found: {method} {path}")
 
 
 class TestEnvPatch:
@@ -64,3 +76,38 @@ class TestSerializers:
         assert "screener" in cfg
         assert "risk" in cfg
         assert cfg["risk"]["max_open_risk_pct"] == cfg["risk"]["max_open_risk_pct"]
+
+
+class TestBotApi:
+    def test_once_rejects_when_bot_is_running(self, monkeypatch, tmp_path) -> None:
+        api_app = importlib.import_module("my_trade.api.app")
+        settings = SimpleNamespace(runtime=SimpleNamespace(log_dir=str(tmp_path)))
+        status = SimpleNamespace(running=True, pid=1234, last_cycle_at=None)
+
+        class PaperHelpers:
+            def run_once(self, _settings) -> int:
+                raise AssertionError("run_once should not be called while bot is running")
+
+        monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+        monkeypatch.setattr(api_app, "get_bot_status", lambda _log_dir: status)
+        monkeypatch.setattr(api_app, "_paper_helpers", lambda: PaperHelpers())
+
+        endpoint = _route_endpoint(api_app.create_app(), "/api/bot/once", "POST")
+
+        with pytest.raises(HTTPException) as exc_info:
+            endpoint()
+        assert exc_info.value.status_code == 409
+        assert "Bot already running" in exc_info.value.detail
+
+    def test_once_rejects_when_another_bot_operation_is_active(self) -> None:
+        api_app = importlib.import_module("my_trade.api.app")
+        assert api_app._BOT_OPERATION_LOCK.acquire(blocking=False)
+        try:
+            endpoint = _route_endpoint(api_app.create_app(), "/api/bot/once", "POST")
+            with pytest.raises(HTTPException) as exc_info:
+                endpoint()
+        finally:
+            api_app._BOT_OPERATION_LOCK.release()
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail == "Another bot operation is already in progress"
