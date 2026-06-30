@@ -8,8 +8,11 @@ and exposes state.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -45,6 +48,19 @@ def _paper_helpers() -> Any:
     from scripts import paper_trade as pt
 
     return pt
+
+
+_BOT_OPERATION_LOCK = Lock()
+
+
+@contextmanager
+def _bot_operation() -> Iterator[None]:
+    if not _BOT_OPERATION_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Another bot operation is already in progress")
+    try:
+        yield
+    finally:
+        _BOT_OPERATION_LOCK.release()
 
 
 def create_app() -> FastAPI:
@@ -304,10 +320,17 @@ def create_app() -> FastAPI:
 
     @app.post("/api/bot/once")
     def bot_once() -> dict[str, Any]:
-        pt = _paper_helpers()
-        settings = load_settings()
-        code = pt.run_once(settings)
-        bot = get_bot_status(settings.runtime.log_dir)
+        with _bot_operation():
+            pt = _paper_helpers()
+            settings = load_settings()
+            bot = get_bot_status(settings.runtime.log_dir)
+            if bot.running:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Bot already running (pid {bot.pid}); stop it before running one cycle",
+                )
+            code = pt.run_once(settings)
+            bot = get_bot_status(settings.runtime.log_dir)
         return {
             "ok": code == 0,
             "message": "Single cycle completed" if code == 0 else "Cycle completed with errors",
@@ -317,29 +340,32 @@ def create_app() -> FastAPI:
 
     @app.post("/api/bot/start")
     def bot_start() -> dict[str, Any]:
-        settings = load_settings()
-        try:
-            settings.validate_for_trading()
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        ok, message = start_bot(settings.runtime.log_dir)
+        with _bot_operation():
+            settings = load_settings()
+            try:
+                settings.validate_for_trading()
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            ok, message = start_bot(settings.runtime.log_dir)
         return {"ok": ok, "message": message}
 
     @app.post("/api/bot/stop")
     def bot_stop() -> dict[str, Any]:
-        settings = load_settings()
-        ok, message = stop_bot(settings.runtime.log_dir)
+        with _bot_operation():
+            settings = load_settings()
+            ok, message = stop_bot(settings.runtime.log_dir)
         return {"ok": ok, "message": message}
 
     @app.post("/api/bot/restart")
     def bot_restart() -> dict[str, Any]:
-        settings = load_settings()
-        stop_bot(settings.runtime.log_dir)
-        try:
-            settings.validate_for_trading()
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        ok, message = start_bot(settings.runtime.log_dir)
+        with _bot_operation():
+            settings = load_settings()
+            stop_bot(settings.runtime.log_dir)
+            try:
+                settings.validate_for_trading()
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            ok, message = start_bot(settings.runtime.log_dir)
         return {"ok": ok, "message": f"Restarted: {message}"}
 
     return app
