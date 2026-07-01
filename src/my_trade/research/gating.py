@@ -40,9 +40,13 @@ def research_veto_reason(
     if block_hold and idea.action is TradeAction.HOLD and idea.confidence >= min_confidence:
         return f"research hold conf={idea.confidence:.2f}"
 
-    if require_long_approval:
-        if idea.action is not TradeAction.LONG or idea.confidence < min_confidence:
-            return f"research did not approve long (action={idea.action.value} conf={idea.confidence:.2f})"
+    if require_long_approval and (
+        idea.action is not TradeAction.LONG or idea.confidence < min_confidence
+    ):
+        return (
+            "research did not approve long "
+            f"(action={idea.action.value} conf={idea.confidence:.2f})"
+        )
 
     return None
 
