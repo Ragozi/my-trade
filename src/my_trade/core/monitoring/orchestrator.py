@@ -18,8 +18,8 @@ Safety invariants preserved here:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -148,6 +148,7 @@ class TradingOrchestrator:
         self._log = logger or logging.getLogger("my_trade.monitoring")
         self._state: DailyState = self._store.load() or DailyState.empty()
         self._prev_positions: dict[str, Position] = {}
+        self._last_research_proposal: ClaudeProposal | None = None
 
     @property
     def state(self) -> DailyState:
@@ -505,7 +506,8 @@ class TradingOrchestrator:
                     detail=proposal.skip_reason or "skipped",
                 )
             )
-            return actions, proposal
+            return actions, self._last_research_proposal or proposal
+        self._last_research_proposal = proposal
         if self._memory is not None:
             self._memory.note_proposals(proposal.ideas)
         self._log.info(

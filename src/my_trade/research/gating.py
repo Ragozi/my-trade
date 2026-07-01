@@ -24,8 +24,8 @@ def research_veto_reason(
 ) -> str | None:
     """Return a human-readable veto reason, or None if entry may proceed."""
     if proposal is None or proposal.skipped:
-        if require_long_approval:
-            return "research unavailable (approval required)"
+        if require_long_approval or block_avoid or block_hold:
+            return "research unavailable (blocking gates active)"
         return None
 
     idea = idea_for_symbol(proposal, symbol)
@@ -40,9 +40,13 @@ def research_veto_reason(
     if block_hold and idea.action is TradeAction.HOLD and idea.confidence >= min_confidence:
         return f"research hold conf={idea.confidence:.2f}"
 
-    if require_long_approval:
-        if idea.action is not TradeAction.LONG or idea.confidence < min_confidence:
-            return f"research did not approve long (action={idea.action.value} conf={idea.confidence:.2f})"
+    if require_long_approval and (
+        idea.action is not TradeAction.LONG or idea.confidence < min_confidence
+    ):
+        return (
+            "research did not approve long "
+            f"(action={idea.action.value} conf={idea.confidence:.2f})"
+        )
 
     return None
 
