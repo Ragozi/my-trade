@@ -24,8 +24,8 @@ def research_veto_reason(
 ) -> str | None:
     """Return a human-readable veto reason, or None if entry may proceed."""
     if proposal is None or proposal.skipped:
-        if require_long_approval:
-            return "research unavailable (approval required)"
+        if require_long_approval or block_avoid or block_hold:
+            return "research unavailable (blocking gates active)"
         return None
 
     idea = idea_for_symbol(proposal, symbol)
