@@ -46,6 +46,38 @@ class DailyState:
         return self.entries_today.get(normalize_symbol(symbol), 0)
 
 
+def virtual_broker_scale(trading_capital: float, broker_equity: float) -> float:
+    """Ratio mapping broker dollars to virtual ``TRADING_CAPITAL`` dollars."""
+    if trading_capital <= 0 or broker_equity <= 0:
+        return 1.0
+    return trading_capital / broker_equity
+
+
+def normalize_peak_equity(
+    stored_peak: float,
+    risk_equity: float,
+    *,
+    trading_capital: float | None,
+    broker_equity: float,
+    broker_sod_equity: float = 0.0,
+) -> float:
+    """Express peak on the same scale as ``risk_equity`` (for R4 circuit breaker).
+
+    Peaks persisted before ``TRADING_CAPITAL`` was enabled are in full broker
+    dollars; rescale them proportionally so a ~$105k paper peak becomes ~$15k.
+    """
+    if not trading_capital or trading_capital <= 0:
+        return max(stored_peak, risk_equity)
+
+    ref_broker = broker_sod_equity if broker_sod_equity > 0 else broker_equity
+    peak = stored_peak
+    stale = peak > trading_capital * 1.25 and peak > risk_equity * 1.5
+    if stale and ref_broker > 0:
+        peak = peak * virtual_broker_scale(trading_capital, ref_broker)
+
+    return max(peak, risk_equity)
+
+
 def resolve_risk_equity(
     broker_equity: float,
     state: DailyState,
@@ -83,6 +115,13 @@ def rollover_if_new_day(
         return state
     risk_sod = trading_capital if trading_capital and trading_capital > 0 else broker_equity
     prior_peak = state.peak_equity if state.peak_equity > 0 else risk_sod
+    prior_peak = normalize_peak_equity(
+        prior_peak,
+        risk_sod,
+        trading_capital=trading_capital,
+        broker_equity=broker_equity,
+        broker_sod_equity=broker_equity,
+    )
     return DailyState(
         trading_day=today,
         start_of_day_equity=risk_sod,
@@ -155,7 +194,13 @@ def build_account_state(
         state,
         trading_capital=trading_capital,
     )
-    peak = max(state.peak_equity, equity)
+    peak = normalize_peak_equity(
+        state.peak_equity,
+        equity,
+        trading_capital=trading_capital,
+        broker_equity=snapshot.equity,
+        broker_sod_equity=state.broker_sod_equity,
+    )
 
     open_risk = 0.0
     for pos in snapshot.positions:

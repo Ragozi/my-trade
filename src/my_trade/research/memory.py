@@ -32,6 +32,7 @@ class ResearchMemoryStore:
     postmortem: PostMortemGenerator | None = None
     _reflections: list[ClosedTradeReflection] = field(default_factory=list)
     _thesis_by_symbol: dict[str, str] = field(default_factory=dict)
+    _stance_by_symbol: dict[str, TradeIdea] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.path = Path(self.path)
@@ -54,12 +55,21 @@ class ResearchMemoryStore:
         self._thesis_by_symbol = {
             str(k).upper(): str(v) for k, v in (raw.get("thesis_cache") or {}).items()
         }
+        for sym, item in (raw.get("stance_cache") or {}).items():
+            try:
+                self._stance_by_symbol[str(sym).upper()] = TradeIdea.model_validate(item)
+            except Exception as exc:
+                _log.debug("skip invalid stance for %s: %s", sym, exc)
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "reflections": [r.model_dump(mode="json") for r in self._reflections],
             "thesis_cache": self._thesis_by_symbol,
+            "stance_cache": {
+                sym: idea.model_dump(mode="json")
+                for sym, idea in self._stance_by_symbol.items()
+            },
         }
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -82,10 +92,21 @@ class ResearchMemoryStore:
         return reflection
 
     def note_proposals(self, ideas: Sequence[TradeIdea]) -> None:
-        """Cache latest Claude thesis per symbol from the current proposal batch."""
+        """Cache latest research thesis and stance per symbol from proposals."""
         for idea in ideas:
+            sym = idea.symbol.upper()
+            self._stance_by_symbol[sym] = idea
             if idea.thesis:
-                self._thesis_by_symbol[idea.symbol.upper()] = idea.thesis
+                self._thesis_by_symbol[sym] = idea.thesis
+        self._save()
+
+    @property
+    def thesis_cache(self) -> dict[str, str]:
+        return dict(self._thesis_by_symbol)
+
+    def stance_for_symbol(self, symbol: str) -> TradeIdea | None:
+        """Last known research stance — used when the current cycle skipped research."""
+        return self._stance_by_symbol.get(symbol.upper())
 
     def record_close(
         self,

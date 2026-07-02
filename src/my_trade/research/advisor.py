@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from my_trade.research.client import ResearchClient
-from my_trade.research.models import ClaudeProposal, ResearchResult, TradeAction
+from my_trade.research.models import ClaudeProposal, ResearchResult, TradeAction, TradeIdea
 from my_trade.research.rate_limit import ResearchRateLimiter
 
 _log = logging.getLogger("my_trade.research.advisor")
@@ -98,7 +98,6 @@ class ResearchAdvisor:
                     "(pausing Claude calls for 1h)"
                 )
             else:
-                self._limiter.record_call(when)
                 _log.warning("research call failed: %s", exc)
             return ResearchResult(
                 proposal=ClaudeProposal(skipped=True, skip_reason=msg),
@@ -113,7 +112,13 @@ class ResearchAdvisor:
             if idea.action is TradeAction.LONG and idea.confidence >= self._config.min_confidence
         )
 
-    def allows_entry(self, symbol: str, proposal: ClaudeProposal) -> bool:
+    def allows_entry(
+        self,
+        symbol: str,
+        proposal: ClaudeProposal,
+        *,
+        sticky_idea: TradeIdea | None = None,
+    ) -> bool:
         """Whether deterministic entry may proceed for this symbol."""
         from my_trade.research.gating import allows_entry_with_gates
 
@@ -124,9 +129,16 @@ class ResearchAdvisor:
             block_avoid=self._config.block_avoid_for_entry,
             block_hold=self._config.block_hold_for_entry,
             require_long_approval=self._config.require_approval_for_entry,
+            sticky_idea=sticky_idea,
         )
 
-    def entry_veto_reason(self, symbol: str, proposal: ClaudeProposal) -> str | None:
+    def entry_veto_reason(
+        self,
+        symbol: str,
+        proposal: ClaudeProposal,
+        *,
+        sticky_idea: TradeIdea | None = None,
+    ) -> str | None:
         from my_trade.research.gating import research_veto_reason
 
         return research_veto_reason(
@@ -136,4 +148,5 @@ class ResearchAdvisor:
             block_avoid=self._config.block_avoid_for_entry,
             block_hold=self._config.block_hold_for_entry,
             require_long_approval=self._config.require_approval_for_entry,
+            sticky_idea=sticky_idea,
         )

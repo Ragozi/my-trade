@@ -128,6 +128,7 @@ class AlpacaBrokerClient:
             client_order_id=str(getattr(order, "client_order_id", "")),
             status=_to_status(getattr(order, "status", None)),
             order_id=str(order.id) if getattr(order, "id", None) is not None else None,
+            symbol=str(getattr(order, "symbol", "") or ""),
             filled_qty=_opt_float(getattr(order, "filled_qty", 0.0)) or 0.0,
             filled_avg_price=_opt_float(getattr(order, "filled_avg_price", None)),
             submitted_at=datetime.now(UTC),

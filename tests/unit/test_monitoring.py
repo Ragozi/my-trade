@@ -286,6 +286,32 @@ class TestBuildAccountState:
         assert acct.start_of_day_equity == 15_000.0
         assert acct.realized_day_pnl == pytest.approx(acct.equity - 15_000.0)
 
+    def test_trading_capital_rescales_stale_broker_peak(self) -> None:
+        """Broker-era peak (~105k) must not trip R4 on a 15k virtual account."""
+        state = DailyState(
+            trading_day=TODAY,
+            start_of_day_equity=15_000.0,
+            peak_equity=105_263.48,
+            broker_sod_equity=94_860.32,
+        )
+        snap = snapshot(equity=94_860.32)
+        acct = build_account_state(
+            snap, state, fallback_stop_pct=0.0065, trading_capital=15_000.0
+        )
+        assert acct.equity == pytest.approx(15_000.0)
+        assert acct.peak_equity == pytest.approx(105_263.48 * (15_000 / 94_860.32))
+        from my_trade.core.risk import RiskLimits, is_circuit_breaker_tripped
+
+        limits = RiskLimits(
+            max_risk_per_trade_pct=0.01,
+            max_total_open_risk_pct=0.05,
+            daily_loss_limit_pct=0.03,
+            max_drawdown_pct=0.15,
+            max_concurrent_positions=1,
+            max_notional_pct=0.20,
+        )
+        assert is_circuit_breaker_tripped(acct, limits) is False
+
 
 # --------------------------------------------------------------------------- #
 # Persistence

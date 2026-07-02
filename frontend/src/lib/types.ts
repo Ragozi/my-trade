@@ -139,11 +139,79 @@ export interface Stats {
   latest_equity: { equity: number; day_pnl: number } | null;
 }
 
+export interface WatchlistKnowledge {
+  symbol: string;
+  action?: string | null;
+  confidence?: number | null;
+  instrument?: string | null;
+  time_horizon?: string | null;
+  thesis?: string;
+  provider?: string | null;
+  updated_at?: string | null;
+  why_watch?: string;
+  recent_lesson?: string;
+  source?: string;
+}
+
 export interface Watchlist {
   symbols: string[];
   ranked: { symbol: string; atr_pct: number; dollar_volume: number; score: number }[];
+  knowledge?: WatchlistKnowledge[];
   refreshed_at: string | null;
   universe_source?: string;
+}
+
+export interface TradeKnowledgeStats {
+  entries: number;
+  exits: number;
+  wins: number;
+  losses: number;
+  flats: number;
+  rejections: number;
+  exit_failures: number;
+  vetoes: number;
+}
+
+export interface TradeKnowledgeDailySummary {
+  trading_day: string;
+  closed_at: string;
+  virtual_equity: number | null;
+  day_pnl: number | null;
+  entries: number;
+  exits: number;
+  wins: number;
+  losses: number;
+  flats: number;
+  key_lessons: string[];
+  narrative: string;
+}
+
+export interface TradeKnowledgeRecord {
+  id: string;
+  ts: string;
+  trading_day: string;
+  event_kind: string;
+  symbol: string;
+  outcome: string;
+  pnl_estimate: number | null;
+  equity: number | null;
+  day_pnl: number | null;
+  what_happened: string;
+  how_it_happened: string;
+  why_it_happened: string;
+  research_action: string | null;
+  research_confidence: number | null;
+  research_thesis: string | null;
+  lessons: string[];
+}
+
+export interface TradeKnowledgeResponse {
+  file: string;
+  record_count: number;
+  last_updated: string | null;
+  stats: TradeKnowledgeStats;
+  daily_summaries: TradeKnowledgeDailySummary[];
+  records: TradeKnowledgeRecord[];
 }
 
 export interface LogsResponse {

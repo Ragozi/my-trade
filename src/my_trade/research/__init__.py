@@ -11,6 +11,7 @@ from my_trade.research.factory import (
     build_research_client,
     build_research_evaluation,
     build_research_memory,
+    build_trade_knowledge,
     research_is_active,
 )
 from my_trade.research.history import (
@@ -18,6 +19,7 @@ from my_trade.research.history import (
     pair_trades_from_events,
     summarize_reflection,
 )
+from my_trade.research.knowledge import TradeKnowledgeStore
 from my_trade.research.memory import ResearchMemoryStore
 from my_trade.research.models import (
     ClaudeProposal,
@@ -59,6 +61,7 @@ __all__ = [
     "ResearchResult",
     "TradeAction",
     "TradeIdea",
+    "TradeKnowledgeStore",
     "build_portfolio_snapshot",
     "build_postmortem_client",
     "build_research_advisor",
@@ -66,6 +69,7 @@ __all__ = [
     "build_research_context",
     "build_research_evaluation",
     "build_research_memory",
+    "build_trade_knowledge",
     "build_reflection",
     "compute_performance",
     "pair_trades_from_events",

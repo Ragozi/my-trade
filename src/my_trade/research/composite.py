@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 
 from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
-from my_trade.research.models import ClaudeProposal, ResearchResult, TradeAction
+from my_trade.research.models import ClaudeProposal, ResearchResult, TradeAction, TradeIdea
 
 _log = logging.getLogger("my_trade.research.composite")
 
@@ -91,7 +91,13 @@ class CompositeResearchAdvisor:
             and idea.confidence >= self._config.min_confidence
         )
 
-    def allows_entry(self, symbol: str, proposal: ClaudeProposal) -> bool:
+    def allows_entry(
+        self,
+        symbol: str,
+        proposal: ClaudeProposal,
+        *,
+        sticky_idea: TradeIdea | None = None,
+    ) -> bool:
         from my_trade.research.gating import allows_entry_with_gates
 
         return allows_entry_with_gates(
@@ -101,9 +107,16 @@ class CompositeResearchAdvisor:
             block_avoid=self._config.block_avoid_for_entry,
             block_hold=self._config.block_hold_for_entry,
             require_long_approval=self._config.require_approval_for_entry,
+            sticky_idea=sticky_idea,
         )
 
-    def entry_veto_reason(self, symbol: str, proposal: ClaudeProposal) -> str | None:
+    def entry_veto_reason(
+        self,
+        symbol: str,
+        proposal: ClaudeProposal,
+        *,
+        sticky_idea: TradeIdea | None = None,
+    ) -> str | None:
         from my_trade.research.gating import research_veto_reason
 
         return research_veto_reason(
@@ -113,4 +126,5 @@ class CompositeResearchAdvisor:
             block_avoid=self._config.block_avoid_for_entry,
             block_hold=self._config.block_hold_for_entry,
             require_long_approval=self._config.require_approval_for_entry,
+            sticky_idea=sticky_idea,
         )

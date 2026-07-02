@@ -7,6 +7,7 @@ from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
 from my_trade.research.client import ClaudeResearchClient
 from my_trade.research.composite import CompositeResearchAdvisor
 from my_trade.research.evaluation import ResearchEvaluationStore
+from my_trade.research.knowledge import TradeKnowledgeStore
 from my_trade.research.memory import ResearchMemoryStore
 from my_trade.research.postmortem import PostMortemBudget, PostMortemGenerator
 from my_trade.research.providers import OpenAIResearchClient, XAIResearchClient
@@ -120,6 +121,15 @@ def build_research_memory(
         max_reflections=rc.memory_max_reflections,
         performance_window=rc.performance_window,
         postmortem=postmortem,
+    )
+
+
+def build_trade_knowledge(settings: Settings) -> TradeKnowledgeStore:
+    """Structured event log for every trade — always on when the bot runs."""
+    rc = settings.research
+    return TradeKnowledgeStore(
+        rc.knowledge_file,
+        max_records=rc.knowledge_max_records,
     )
 
 

@@ -13,6 +13,19 @@ def idea_for_symbol(proposal: ClaudeProposal, symbol: str) -> TradeIdea | None:
     return None
 
 
+def _effective_idea(
+    proposal: ClaudeProposal | None,
+    symbol: str,
+    *,
+    sticky_idea: TradeIdea | None,
+) -> TradeIdea | None:
+    if proposal is not None and not proposal.skipped:
+        idea = idea_for_symbol(proposal, symbol)
+        if idea is not None:
+            return idea
+    return sticky_idea
+
+
 def research_veto_reason(
     proposal: ClaudeProposal | None,
     symbol: str,
@@ -21,24 +34,25 @@ def research_veto_reason(
     block_avoid: bool,
     block_hold: bool,
     require_long_approval: bool,
+    sticky_idea: TradeIdea | None = None,
 ) -> str | None:
     """Return a human-readable veto reason, or None if entry may proceed."""
-    if proposal is None or proposal.skipped:
-        if require_long_approval:
-            return "research unavailable (approval required)"
-        return None
+    idea = _effective_idea(proposal, symbol, sticky_idea=sticky_idea)
 
-    idea = idea_for_symbol(proposal, symbol)
     if idea is None:
         if require_long_approval:
+            if proposal is None or proposal.skipped:
+                return "research unavailable (approval required)"
             return "research did not propose this symbol"
         return None
 
     if block_avoid and idea.action is TradeAction.AVOID and idea.confidence >= min_confidence:
-        return f"research avoid conf={idea.confidence:.2f}"
+        label = "sticky " if proposal is None or proposal.skipped else ""
+        return f"{label}research avoid conf={idea.confidence:.2f}"
 
     if block_hold and idea.action is TradeAction.HOLD and idea.confidence >= min_confidence:
-        return f"research hold conf={idea.confidence:.2f}"
+        label = "sticky " if proposal is None or proposal.skipped else ""
+        return f"{label}research hold conf={idea.confidence:.2f}"
 
     if require_long_approval:
         if idea.action is not TradeAction.LONG or idea.confidence < min_confidence:
@@ -55,6 +69,7 @@ def allows_entry_with_gates(
     block_avoid: bool,
     block_hold: bool,
     require_long_approval: bool,
+    sticky_idea: TradeIdea | None = None,
 ) -> bool:
     return research_veto_reason(
         proposal,
@@ -63,4 +78,5 @@ def allows_entry_with_gates(
         block_avoid=block_avoid,
         block_hold=block_hold,
         require_long_approval=require_long_approval,
+        sticky_idea=sticky_idea,
     ) is None

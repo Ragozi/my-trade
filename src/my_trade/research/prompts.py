@@ -25,6 +25,9 @@ Rules:
   adding correlated exposure when a sector is already heavy.
 - claude_vs_strategy shows how often your ideas align with the deterministic
   strategy; when strategy_only entries outperform, be more selective on "long".
+- trade_knowledge_log is the authoritative event log: every entry, exit, win, loss,
+  rejection, and veto with what/how/why fields. Treat it as ground truth for past
+  behavior — do not contradict it; learn from lessons[] on each row.
 """
 
 RESPONSE_SCHEMA = {
@@ -86,14 +89,15 @@ def build_user_prompt(context: ResearchContext, *, max_ideas: int) -> str:
         "portfolio_snapshot": portfolio,
         "claude_vs_strategy": comparison,
         "daily_brief": context.daily_brief,
+        "trade_knowledge_log": list(context.trade_knowledge),
         "max_ideas": max_ideas,
     }
     return (
         "Analyze the following portfolio context and propose up to "
         f"{max_ideas} trade ideas.\n\n"
-        "Use daily_brief (pre-digested journal stats), recent_reflections, "
-        "recent_performance, portfolio_snapshot, and claude_vs_strategy "
-        "to adjust your suggestions.\n\n"
+        "Use daily_brief, trade_knowledge_log (every recent transaction with "
+        "what/how/why), recent_reflections, recent_performance, portfolio_snapshot, "
+        "and claude_vs_strategy to adjust your suggestions.\n\n"
         f"Context JSON:\n{json.dumps(payload, indent=2, default=str)}\n\n"
         f"Return JSON matching this schema:\n{json.dumps(RESPONSE_SCHEMA, indent=2)}"
     )

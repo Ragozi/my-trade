@@ -189,7 +189,7 @@ class WorkhorseSettings:
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     xai_api_key: str = ""
-    xai_model: str = "grok-2-1212"
+    xai_model: str = "grok-4.3"
     min_interval_seconds: int = 900
     max_calls_per_day: int = 16
     max_tokens: int = 2048
@@ -206,7 +206,7 @@ class PremiumSettings:
 
     provider: str = "none"  # none | openai | xai
     openai_model: str = "gpt-4o"
-    xai_model: str = "grok-2-1212"
+    xai_model: str = "grok-4.3"
     min_interval_seconds: int = 1800
     max_calls_per_day: int = 4
     max_tokens: int = 2048
@@ -241,6 +241,8 @@ class ResearchSettings:
     equities_only: bool = True
     memory_file: str = "logs/research_memory.json"
     memory_max_reflections: int = 100
+    knowledge_file: str = "logs/trade_knowledge.json"
+    knowledge_max_records: int = 10_000
     performance_window: int = 20
     evaluation_file: str = "logs/research_evaluation.json"
     evaluation_max_records: int = 500
@@ -420,7 +422,7 @@ def _load_workhorse(env: Mapping[str, str]) -> WorkhorseSettings:
         openai_api_key=env_str(env, "OPENAI_API_KEY", ""),
         openai_model=env_str(env, "OPENAI_MODEL", "gpt-4o-mini"),
         xai_api_key=env_str(env, "XAI_API_KEY", ""),
-        xai_model=env_str(env, "XAI_MODEL", "grok-2-1212"),
+        xai_model=env_str(env, "XAI_MODEL", "grok-4.3"),
         min_interval_seconds=env_int(env, "RESEARCH_WORKHORSE_INTERVAL_SECONDS", 900),
         max_calls_per_day=env_int(env, "RESEARCH_WORKHORSE_MAX_CALLS_PER_DAY", 16),
         max_tokens=env_int(env, "RESEARCH_WORKHORSE_MAX_TOKENS", 2048),
@@ -432,7 +434,7 @@ def _load_premium(env: Mapping[str, str]) -> PremiumSettings:
     return PremiumSettings(
         provider=env_str(env, "RESEARCH_PREMIUM_PROVIDER", "none").strip().lower(),
         openai_model=env_str(env, "RESEARCH_PREMIUM_OPENAI_MODEL", "gpt-4o"),
-        xai_model=env_str(env, "RESEARCH_PREMIUM_XAI_MODEL", "grok-2-1212"),
+        xai_model=env_str(env, "RESEARCH_PREMIUM_XAI_MODEL", "grok-4.3"),
         min_interval_seconds=env_int(env, "RESEARCH_PREMIUM_INTERVAL_SECONDS", 1800),
         max_calls_per_day=env_int(env, "RESEARCH_PREMIUM_MAX_CALLS_PER_DAY", 4),
         max_tokens=env_int(env, "RESEARCH_PREMIUM_MAX_TOKENS", 2048),
@@ -471,6 +473,8 @@ def _load_research(env: Mapping[str, str]) -> ResearchSettings:
         equities_only=env_bool(env, "CLAUDE_EQUITIES_ONLY", True),
         memory_file=env_str(env, "CLAUDE_MEMORY_FILE", "logs/research_memory.json"),
         memory_max_reflections=env_int(env, "CLAUDE_MEMORY_MAX_REFLECTIONS", 100),
+        knowledge_file=env_str(env, "TRADE_KNOWLEDGE_FILE", "logs/trade_knowledge.json"),
+        knowledge_max_records=env_int(env, "TRADE_KNOWLEDGE_MAX_RECORDS", 10_000),
         performance_window=env_int(env, "CLAUDE_PERFORMANCE_WINDOW", 20),
         evaluation_file=env_str(env, "CLAUDE_EVALUATION_FILE", "logs/research_evaluation.json"),
         evaluation_max_records=env_int(env, "CLAUDE_EVALUATION_MAX_RECORDS", 500),

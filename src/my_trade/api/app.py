@@ -29,7 +29,14 @@ from my_trade.api.serializers import (
     stats_from_events,
     watchlist_to_json,
 )
+from my_trade.api.watchlist_intel import (
+    build_watchlist_intel,
+    latest_proposals_by_symbol,
+    load_recent_lessons,
+    load_thesis_cache,
+)
 from my_trade.config import load_settings
+from my_trade.research.factory import build_trade_knowledge
 from my_trade.core.market_calendar import make_session_guard
 from my_trade.core.monitoring import DailyStateStore
 from my_trade.core.monitoring.alpaca_account import AlpacaAccountProvider
@@ -45,6 +52,30 @@ def _paper_helpers() -> Any:
     from scripts import paper_trade as pt
 
     return pt
+
+
+def _watchlist_knowledge(
+    symbols: list[str],
+    *,
+    universe_source: str,
+    journal_db: str,
+    memory_file: str,
+) -> list[dict[str, Any]]:
+    journal = Journal(journal_db)
+    try:
+        events = list(journal.fetch_recent(300))
+    finally:
+        journal.close()
+    proposals = latest_proposals_by_symbol(
+        [e for e in events if e.kind == "research_proposal"]
+    )
+    return build_watchlist_intel(
+        symbols,
+        universe_source=universe_source,
+        thesis_cache=load_thesis_cache(memory_file),
+        lessons=load_recent_lessons(memory_file),
+        proposals=proposals,
+    )
 
 
 def create_app() -> FastAPI:
@@ -238,11 +269,18 @@ def create_app() -> FastAPI:
         settings = load_settings()
         sc = settings.screener
         if not sc.enabled:
+            symbols = list(settings.symbols)
             return watchlist_to_json(
-                list(settings.symbols),
+                symbols,
                 [],
                 refreshed_at=None,
                 universe_source="static_config",
+                knowledge=_watchlist_knowledge(
+                    symbols,
+                    universe_source="static_config",
+                    journal_db=settings.runtime.journal_db,
+                    memory_file=settings.research.memory_file,
+                ),
             )
         if settings.is_equities and sc.use_movers:
             universe: Any = AlpacaMoversUniverse(
@@ -273,11 +311,34 @@ def create_app() -> FastAPI:
             refresh_seconds=sc.refresh_seconds,
         )
         ranked = screener.screen()
+        symbols = [c.symbol for c in ranked]
         return watchlist_to_json(
-            [c.symbol for c in ranked],
+            symbols,
             ranked,
             refreshed_at=datetime.now(UTC),
             universe_source=source,
+            knowledge=_watchlist_knowledge(
+                symbols,
+                universe_source=source,
+                journal_db=settings.runtime.journal_db,
+                memory_file=settings.research.memory_file,
+            ),
+        )
+
+    @app.get("/api/trade-knowledge")
+    def trade_knowledge(
+        limit: int = Query(100, ge=1, le=500),
+        symbol: str | None = None,
+        event_kind: str | None = None,
+        trading_day: str | None = None,
+    ) -> dict[str, Any]:
+        settings = load_settings()
+        store = build_trade_knowledge(settings)
+        return store.api_payload(
+            limit=limit,
+            symbol=symbol,
+            event_kind=event_kind,
+            trading_day=trading_day,
         )
 
     @app.get("/api/logs")

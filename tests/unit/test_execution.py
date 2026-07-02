@@ -76,6 +76,7 @@ class FakeBroker:
         transient_failures: int = 0,
         permanent_error: bool = False,
         existing: dict[str, OrderResult] | None = None,
+        open_orders: list[OrderResult] | None = None,
     ) -> None:
         self.submitted: list[OrderRequest] = []
         self.submit_calls = 0
@@ -84,6 +85,7 @@ class FakeBroker:
         self._transient_failures = transient_failures
         self._permanent_error = permanent_error
         self._existing = existing or {}
+        self._open_orders = list(open_orders or [])
 
     def submit_order(self, request: OrderRequest) -> OrderResult:
         self.submit_calls += 1
@@ -104,9 +106,10 @@ class FakeBroker:
 
     def cancel_order(self, order_id: str) -> None:
         self.cancelled.append(order_id)
+        self._open_orders = [o for o in self._open_orders if o.order_id != order_id]
 
     def list_open_orders(self) -> list[OrderResult]:
-        return []
+        return list(self._open_orders)
 
     def close_position(self, symbol: str) -> OrderResult:
         self.closed.append(symbol)
@@ -341,6 +344,28 @@ class TestExecuteEntry:
         outcome = make_adapter(broker).close_position("BTC/USD", now=NOW)
         assert outcome.status is ExecutionStatus.BROKER_ERROR
         assert outcome.submitted is False
+
+    def test_close_position_cancels_open_orders_first(self) -> None:
+        broker = FakeBroker(
+            open_orders=[
+                OrderResult(
+                    client_order_id="bracket-stop",
+                    status=OrderStatus.ACCEPTED,
+                    order_id="stop-1",
+                    symbol="MSFT",
+                ),
+                OrderResult(
+                    client_order_id="other-symbol",
+                    status=OrderStatus.ACCEPTED,
+                    order_id="tp-9",
+                    symbol="AAPL",
+                ),
+            ]
+        )
+        outcome = make_adapter(broker).close_position("MSFT", now=NOW)
+        assert outcome.status is ExecutionStatus.SUBMITTED
+        assert broker.cancelled == ["stop-1"]
+        assert broker.closed == ["MSFT"]
 
     def test_reconcile_returns_existing(self) -> None:
         cid = "mt-entry-BTCUSD-20260618T1407"

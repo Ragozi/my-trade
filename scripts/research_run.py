@@ -118,7 +118,7 @@ def run_once(*, mock: bool, verbose: bool) -> int:
             return 1
 
     from my_trade.research.brief import load_brief
-    from my_trade.research.factory import build_postmortem_client
+    from my_trade.research.factory import build_postmortem_client, build_trade_knowledge
 
     pm_client = build_postmortem_client(settings)
     memory = build_research_memory(settings, client=pm_client)
@@ -137,6 +137,15 @@ def run_once(*, mock: bool, verbose: bool) -> int:
 
     comparison_summary = evaluation.summary() if evaluation is not None else None
 
+    knowledge = build_trade_knowledge(settings)
+    knowledge.sync_from_journal(
+        settings.runtime.journal_db,
+        thesis_by_symbol=memory.thesis_cache if memory is not None else None,
+    )
+    trade_knowledge = tuple(
+        knowledge.recent_for_prompt(symbols=candidates, limit=15)
+    )
+
     context = build_research_context(
         snapshot=snapshot,
         candidate_symbols=candidates,
@@ -153,6 +162,7 @@ def run_once(*, mock: bool, verbose: bool) -> int:
         performance=performance,
         comparison_summary=comparison_summary,
         daily_brief=daily_brief,
+        trade_knowledge=trade_knowledge,
     )
 
     result = advisor.propose(context, when=now)

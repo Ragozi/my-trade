@@ -123,6 +123,7 @@ def watchlist_to_json(
     *,
     refreshed_at: datetime | None,
     universe_source: str,
+    knowledge: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "symbols": symbols,
@@ -135,6 +136,7 @@ def watchlist_to_json(
             }
             for c in ranked
         ],
+        "knowledge": knowledge or [],
         "refreshed_at": refreshed_at.isoformat() if refreshed_at else None,
         "universe_source": universe_source,
     }

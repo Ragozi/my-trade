@@ -34,6 +34,7 @@ def build_research_context(
     portfolio: PortfolioSnapshot | None = None,
     comparison_summary: ComparisonSummary | None = None,
     daily_brief: dict[str, Any] | None = None,
+    trade_knowledge: tuple[dict[str, Any], ...] = (),
 ) -> ResearchContext:
     open_positions = tuple(
         OpenPositionSummary(
@@ -66,4 +67,5 @@ def build_research_context(
         portfolio=portfolio,
         comparison_summary=comparison_summary,
         daily_brief=daily_brief,
+        trade_knowledge=trade_knowledge,
     )

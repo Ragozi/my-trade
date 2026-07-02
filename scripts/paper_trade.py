@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -62,6 +63,7 @@ from my_trade.research import (
     build_research_evaluation,
     build_research_memory,
     build_postmortem_client,
+    build_trade_knowledge,
     research_is_active,
 )
 
@@ -256,6 +258,7 @@ def build_orchestrator(
     research_advisor: object | None = None,
     research_memory: object | None = None,
     research_evaluation: object | None = None,
+    trade_knowledge: object | None = None,
 ) -> TradingOrchestrator:
     strategy = PullbackStrategy(StrategyParams.from_settings(settings))
     return TradingOrchestrator(
@@ -279,6 +282,7 @@ def build_orchestrator(
         research_advisor=research_advisor,  # type: ignore[arg-type]
         research_memory=research_memory,  # type: ignore[arg-type]
         research_evaluation=research_evaluation,  # type: ignore[arg-type]
+        trade_knowledge=trade_knowledge,  # type: ignore[arg-type]
         journal_path=settings.runtime.journal_db,
         research_brief_file=settings.research.brief_file,
     )
@@ -480,6 +484,7 @@ def run_once(settings: Settings) -> int:
     execution = _CountingExecution(build_execution(settings, providers.broker))
     screener = build_screener(settings, data)
     research, memory, evaluation = build_research_stack(settings)
+    knowledge = build_trade_knowledge(settings)
     log_research_status(settings, research)
     orchestrator = build_orchestrator(
         settings,
@@ -490,6 +495,7 @@ def run_once(settings: Settings) -> int:
         research_advisor=research,
         research_memory=memory,
         research_evaluation=evaluation,
+        trade_knowledge=knowledge,
     )
 
     journal = Journal(settings.runtime.journal_db)
@@ -549,11 +555,45 @@ def log_cycle(result: CycleResult) -> None:
             )
 
 
+def _acquire_instance_lock(log_dir: str) -> Path | None:
+    """Refuse to start if another paper runner holds the lock."""
+    lock_path = Path(log_dir) / "paper_bot.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        log.error(
+            "Another paper bot is already running (lock: %s). "
+            "Stop it via the console or Stop My-Trade.bat before starting again.",
+            lock_path,
+        )
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(str(os.getpid()))
+    handle.flush()
+    return lock_path
+
+
 def run_loop(settings: Settings) -> int:
+    lock = _acquire_instance_lock(settings.runtime.log_dir)
+    if lock is None:
+        return 1
     providers = build_providers(settings)
     execution = build_execution(settings, providers.broker)
     screener = build_screener(settings, providers.data)
     research, memory, evaluation = build_research_stack(settings)
+    knowledge = build_trade_knowledge(settings)
     log_research_status(settings, research)
     orchestrator = build_orchestrator(
         settings,
@@ -564,6 +604,7 @@ def run_loop(settings: Settings) -> int:
         research_advisor=research,
         research_memory=memory,
         research_evaluation=evaluation,
+        trade_knowledge=knowledge,
     )
     journal = Journal(settings.runtime.journal_db)
 

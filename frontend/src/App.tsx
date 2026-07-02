@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Positions from "./pages/Positions";
 import Activity from "./pages/Activity";
 import Watchlist from "./pages/Watchlist";
+import Knowledge from "./pages/Knowledge";
 import Control from "./pages/Control";
 import Risk from "./pages/Risk";
 import Settings from "./pages/Settings";
@@ -37,6 +38,7 @@ const App = () => (
               <Route path="/positions" element={<Positions />} />
               <Route path="/activity" element={<Activity />} />
               <Route path="/watchlist" element={<Watchlist />} />
+              <Route path="/knowledge" element={<Knowledge />} />
               <Route path="/control" element={<Control />} />
               <Route path="/risk" element={<Risk />} />
               <Route path="/settings" element={<Settings />} />

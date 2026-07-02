@@ -10,6 +10,7 @@ import type {
   SettingsPatchResult,
   Stats,
   Status,
+  TradeKnowledgeResponse,
   Watchlist,
 } from "@/lib/types";
 
@@ -20,6 +21,8 @@ const KEYS = {
   config: ["config"] as const,
   stats: ["stats"] as const,
   watchlist: ["watchlist"] as const,
+  tradeKnowledge: (params: Record<string, string | number | undefined>) =>
+    ["tradeKnowledge", params] as const,
   events: (params: Record<string, string | number | undefined>) =>
     ["events", params] as const,
   logs: (tail: number) => ["logs", tail] as const,
@@ -70,6 +73,26 @@ export function useWatchlist() {
     queryKey: KEYS.watchlist,
     queryFn: () => api.get<Watchlist>("/api/watchlist"),
     refetchInterval: 15_000,
+  });
+}
+
+export function useTradeKnowledge(params: {
+  limit?: number;
+  symbol?: string;
+  event_kind?: string;
+  trading_day?: string;
+} = {}) {
+  const search = new URLSearchParams();
+  if (params.limit) search.set("limit", String(params.limit));
+  if (params.symbol) search.set("symbol", params.symbol);
+  if (params.event_kind) search.set("event_kind", params.event_kind);
+  if (params.trading_day) search.set("trading_day", params.trading_day);
+  const qs = search.toString();
+  return useQuery({
+    queryKey: KEYS.tradeKnowledge(params as Record<string, string | number | undefined>),
+    queryFn: () =>
+      api.get<TradeKnowledgeResponse>(`/api/trade-knowledge${qs ? `?${qs}` : ""}`),
+    refetchInterval: 20_000,
   });
 }
 

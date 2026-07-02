@@ -26,6 +26,8 @@ from my_trade.core.risk import (
     evaluate_trade,
 )
 
+from my_trade.data import normalize_symbol
+
 from .broker import BrokerClient
 from .idempotency import OrderIntent, make_client_order_id
 from .models import (
@@ -180,11 +182,12 @@ class ExecutionAdapter:
     def close_position(self, symbol: str, *, now: datetime | None = None) -> ExecutionOutcome:
         """Flatten an open position (used by the orchestrator for soft exits).
 
-        Bracket stop/take-profit legs live at the broker; this handles the
-        *discretionary* exits the strategy decides (time stop, RSI, etc.).
+        Bracket stop/take-profit legs live at the broker; cancel them first so
+        shares are not ``held_for_orders`` when we submit a discretionary exit.
         """
         when = now or self._clock()
         client_order_id = make_client_order_id(symbol, OrderIntent.EXIT, when)
+        self._cancel_open_orders_for_symbol(symbol)
         try:
             result: OrderResult = with_retries(
                 lambda: self._broker.close_position(symbol),
@@ -204,6 +207,24 @@ class ExecutionAdapter:
             submitted=True,
             order=result,
         )
+
+    def _cancel_open_orders_for_symbol(self, symbol: str) -> None:
+        """Best-effort cancel of working orders that block a market close."""
+        target = normalize_symbol(symbol)
+        try:
+            open_orders = self._broker.list_open_orders()
+        except BrokerError:
+            return
+        for order in open_orders:
+            if not order.order_id:
+                continue
+            order_sym = normalize_symbol(order.symbol) if order.symbol else ""
+            if order_sym != target:
+                continue
+            try:
+                self._broker.cancel_order(order.order_id)
+            except BrokerError:
+                continue
 
     def reconcile(self, client_order_id: str) -> OrderResult | None:
         """Fetch the current broker state for a previously-submitted order."""

@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Protocol
 
 import pandas as pd
@@ -44,7 +44,6 @@ from .state import (
     mark_halt_lesson_logged,
     record_entry,
     rollover_if_new_day,
-    update_peak,
 )
 from .store import DailyStateStore
 
@@ -53,6 +52,7 @@ if TYPE_CHECKING:
     from my_trade.core.strategy.models import ScanEvaluation, Signal
     from my_trade.research.advisor import ResearchAdvisor
     from my_trade.research.evaluation import ResearchEvaluationStore
+    from my_trade.research.knowledge import TradeKnowledgeStore
     from my_trade.research.memory import ResearchMemoryStore
 
 
@@ -117,6 +117,7 @@ class TradingOrchestrator:
         research_advisor: ResearchAdvisor | None = None,
         research_memory: ResearchMemoryStore | None = None,
         research_evaluation: ResearchEvaluationStore | None = None,
+        trade_knowledge: TradeKnowledgeStore | None = None,
         journal_path: str | None = None,
         research_brief_file: str | None = None,
         clock: Callable[[], datetime] = _utcnow,
@@ -134,6 +135,7 @@ class TradingOrchestrator:
         self._research = research_advisor
         self._memory = research_memory
         self._evaluation = research_evaluation
+        self._trade_knowledge = trade_knowledge
         self._journal_path = journal_path
         self._research_brief_file = research_brief_file
         self._entry_tf = entry_timeframe
@@ -148,6 +150,23 @@ class TradingOrchestrator:
         self._log = logger or logging.getLogger("my_trade.monitoring")
         self._state: DailyState = self._store.load() or DailyState.empty()
         self._prev_positions: dict[str, Position] = {}
+
+    def _sync_trade_knowledge(self) -> int:
+        if self._trade_knowledge is None or not self._journal_path:
+            return 0
+        thesis = self._memory.thesis_cache if self._memory is not None else None
+        return self._trade_knowledge.sync_from_journal(
+            self._journal_path,
+            thesis_by_symbol=thesis,
+        )
+
+    def _record_knowledge_reflection(self, reflection: object) -> None:
+        if self._trade_knowledge is None:
+            return
+        from my_trade.research.models import ClosedTradeReflection
+
+        if isinstance(reflection, ClosedTradeReflection):
+            self._trade_knowledge.record_from_reflection(reflection)
 
     @property
     def state(self) -> DailyState:
@@ -197,6 +216,26 @@ class TradingOrchestrator:
             )
 
         # Daily rollover + peak tracking, persisted before any decision.
+        prev_day = self._state.trading_day
+        today = when.date()
+        if (
+            self._trade_knowledge is not None
+            and prev_day != today
+            and prev_day != date(1970, 1, 1)
+        ):
+            pre_rollover = build_account_state(
+                snapshot,
+                self._state,
+                self._fallback_stop_pct,
+                trading_capital=self._trading_capital,
+            )
+            self._sync_trade_knowledge()
+            self._trade_knowledge.finalize_trading_day(
+                prev_day,
+                equity=pre_rollover.equity,
+                day_pnl=pre_rollover.realized_day_pnl,
+            )
+
         state = rollover_if_new_day(
             self._state,
             when.date(),
@@ -215,8 +254,10 @@ class TradingOrchestrator:
             self._fallback_stop_pct,
             trading_capital=self._trading_capital,
         )
-        state = update_peak(state, account_state.equity)
+        # Persist peak on the same scale as account_state (virtual when TRADING_CAPITAL set).
+        state = replace(state, peak_equity=account_state.peak_equity)
         self._persist(state)
+        self._sync_trade_knowledge()
         day_pnl = account_state.realized_day_pnl
 
         # (1) Manage exits first — always, even if entries are halted.
@@ -320,6 +361,7 @@ class TradingOrchestrator:
                             pnl_estimate=reflection.pnl_estimate,
                             when=when,
                         )
+                    self._record_knowledge_reflection(reflection)
                     detail = reflection.llm_summary or reflection.summary
                     self._log.info(
                         "CLAUDE reflection %s (%s) | %s",
@@ -372,6 +414,7 @@ class TradingOrchestrator:
                     pnl_estimate=ref.pnl_estimate,
                     when=when,
                 )
+            self._record_knowledge_reflection(ref)
             detail = ref.llm_summary or ref.summary
             self._log.info(
                 "loss lesson %s (%s) | %s",
@@ -474,6 +517,16 @@ class TradingOrchestrator:
         if self._research_brief_file:
             daily_brief = load_brief(self._research_brief_file)
 
+        trade_knowledge: tuple[dict[str, object], ...] = ()
+        if self._trade_knowledge is not None:
+            self._sync_trade_knowledge()
+            trade_knowledge = tuple(
+                self._trade_knowledge.recent_for_prompt(
+                    symbols=candidates,
+                    limit=15,
+                )
+            )
+
         context = build_research_context(
             snapshot=snapshot,
             candidate_symbols=candidates,
@@ -488,23 +541,20 @@ class TradingOrchestrator:
             performance=performance,
             comparison_summary=comparison_summary,
             daily_brief=daily_brief,
+            trade_knowledge=trade_knowledge,
         )
         result = self._research.propose(context, when=when)
         proposal = result.proposal
         actions: list[CycleAction] = []
         provider = proposal.provider or "research"
         if proposal.skipped:
-            self._log.info(
-                "research skipped (%s): %s",
-                provider,
-                proposal.skip_reason or "skipped",
-            )
-            actions.append(
-                CycleAction(
-                    ActionKind.RESEARCH_SKIPPED,
-                    detail=proposal.skip_reason or "skipped",
-                )
-            )
+            reason = proposal.skip_reason or "skipped"
+            self._log.info("research skipped (%s): %s", provider, reason)
+            # Routine interval / budget waits are expected — keep them out of the activity feed.
+            if not reason.startswith("rate limited (") and not reason.startswith(
+                "daily budget exhausted"
+            ):
+                actions.append(CycleAction(ActionKind.RESEARCH_SKIPPED, detail=reason))
             return actions, proposal
         if self._memory is not None:
             self._memory.note_proposals(proposal.ideas)
@@ -558,6 +608,15 @@ class TradingOrchestrator:
             if sym in open_symbols:
                 actions.append(CycleAction(ActionKind.SKIP_OPEN_POSITION, symbol))
                 continue
+            if account_state.open_positions >= self._limits.max_concurrent_positions:
+                actions.append(
+                    CycleAction(
+                        ActionKind.ENTRY_REJECTED,
+                        symbol,
+                        "risk rejected: max_positions",
+                    )
+                )
+                continue
             if self._state.entries_for(symbol) >= self._max_entries:
                 actions.append(
                     CycleAction(
@@ -567,13 +626,22 @@ class TradingOrchestrator:
                     )
                 )
                 continue
+            sticky = (
+                self._memory.stance_for_symbol(sym)
+                if self._memory is not None
+                else None
+            )
             if self._research is not None and proposal is not None:
                 veto = (
-                    self._research.entry_veto_reason(symbol, proposal)
+                    self._research.entry_veto_reason(
+                        symbol, proposal, sticky_idea=sticky
+                    )
                     if hasattr(self._research, "entry_veto_reason")
                     else None
                 )
-                if veto is None and not self._research.allows_entry(symbol, proposal):
+                if veto is None and not self._research.allows_entry(
+                    symbol, proposal, sticky_idea=sticky
+                ):
                     veto = "research blocked entry"
                 if veto is not None:
                     actions.append(
@@ -599,6 +667,11 @@ class TradingOrchestrator:
             )
             if outcome.submitted:
                 self._persist(record_entry(self._state, symbol, signal.stop_price, when))
+                open_symbols.add(sym)
+                account_state = replace(
+                    account_state,
+                    open_positions=account_state.open_positions + 1,
+                )
                 if self._evaluation is not None:
                     self._evaluation.record_entry(
                         symbol=symbol,
@@ -623,6 +696,7 @@ class TradingOrchestrator:
                         ActionKind.ENTRY_SUBMITTED, symbol, detail, outcome.status.value
                     )
                 )
+                break
             else:
                 self._log.info("entry rejected %s: %s", symbol, outcome.detail)
                 actions.append(

@@ -97,10 +97,69 @@ def get_bot_status(log_dir: str) -> BotStatus:
     )
 
 
+def _enumerate_paper_bot_pids() -> list[int]:
+    """Return PIDs for any running ``scripts.paper_trade`` processes."""
+    if sys.platform == "win32":
+        script = (
+            "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+            "Where-Object { $_.CommandLine -like '*scripts.paper_trade*' } | "
+            "Select-Object -ExpandProperty ProcessId"
+        )
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return [int(line.strip()) for line in out.stdout.splitlines() if line.strip().isdigit()]
+    try:
+        out = subprocess.run(
+            ["pgrep", "-f", "scripts.paper_trade"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return [int(x) for x in out.stdout.split() if x.strip().isdigit()]
+    except FileNotFoundError:
+        return []
+
+
+def _kill_pid(pid: int) -> None:
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+        )
+    else:
+        try:
+            os.kill(pid, 15)
+        except OSError:
+            pass
+
+
+def stop_all_paper_bots(log_dir: str) -> list[int]:
+    """Stop every paper bot process (pid file + any orphans)."""
+    stopped: list[int] = []
+    for pid in _enumerate_paper_bot_pids():
+        if pid not in stopped:
+            _kill_pid(pid)
+            stopped.append(pid)
+    pid_file = pid_path(log_dir)
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+            if pid not in stopped:
+                _kill_pid(pid)
+                stopped.append(pid)
+        except ValueError:
+            pass
+        pid_file.unlink(missing_ok=True)
+    return stopped
+
+
 def start_bot(log_dir: str) -> tuple[bool, str]:
-    current = get_bot_status(log_dir)
-    if current.running:
-        return False, f"Bot already running (pid {current.pid})"
+    stop_all_paper_bots(log_dir)
     root = _repo_root()
     log_file = log_path(log_dir)
     log_file.parent.mkdir(parents=True, exist_ok=True)
