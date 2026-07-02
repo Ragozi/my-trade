@@ -134,6 +134,7 @@ class OrderResult:
 
     client_order_id: str
     status: OrderStatus
+    symbol: str = ""
     order_id: str | None = None
     filled_qty: float = 0.0
     filled_avg_price: float | None = None

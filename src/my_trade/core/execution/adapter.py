@@ -25,6 +25,7 @@ from my_trade.core.risk import (
     TradeRequest,
     evaluate_trade,
 )
+from my_trade.data import normalize_symbol
 
 from .broker import BrokerClient
 from .idempotency import OrderIntent, make_client_order_id
@@ -208,3 +209,11 @@ class ExecutionAdapter:
     def reconcile(self, client_order_id: str) -> OrderResult | None:
         """Fetch the current broker state for a previously-submitted order."""
         return self._broker.get_order_by_client_id(client_order_id)
+
+    def has_open_order(self, symbol: str) -> bool:
+        """Return whether the broker still has a working order for ``symbol``."""
+        key = normalize_symbol(symbol)
+        return any(
+            order.status.is_open and normalize_symbol(order.symbol) == key
+            for order in self._broker.list_open_orders()
+        )

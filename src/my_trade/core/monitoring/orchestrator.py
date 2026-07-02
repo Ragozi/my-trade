@@ -18,8 +18,8 @@ Safety invariants preserved here:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -289,6 +289,18 @@ class TradingOrchestrator:
             return HaltReason.DAILY_LOSS_LIMIT
         return None
 
+    def _has_open_order(self, symbol: str) -> bool:
+        checker = getattr(self._execution, "has_open_order", None)
+        if checker is None:
+            return False
+        try:
+            return bool(checker(symbol))
+        except Exception as exc:
+            # If broker order reconciliation is unavailable, fail closed for a
+            # remembered flat symbol rather than risk a duplicate entry.
+            self._log.warning("open order reconciliation failed for %s: %s", symbol, exc)
+            return True
+
     def _manage_exits(self, snapshot: AccountSnapshot, when: datetime) -> list[CycleAction]:
         actions: list[CycleAction] = []
         for pos in snapshot.positions:
@@ -551,6 +563,15 @@ class TradingOrchestrator:
         for symbol in self._active_symbols():
             sym = normalize_symbol(symbol)
             if sym not in open_symbols and sym in self._state.position_stops:
+                if self._has_open_order(sym):
+                    actions.append(
+                        CycleAction(
+                            ActionKind.SKIP_OPEN_POSITION,
+                            symbol,
+                            "pending broker order for recorded position",
+                        )
+                    )
+                    continue
                 self._persist(clear_position(self._state, sym))
                 self._log.info(
                     "reconciled stale position state for %s (broker flat)", sym

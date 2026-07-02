@@ -123,8 +123,15 @@ class FakeStrategy:
 
 
 class FakeExecutor:
-    def __init__(self, submitted: bool = True) -> None:
+    def __init__(
+        self,
+        submitted: bool = True,
+        open_order_symbols: set[str] | None = None,
+    ) -> None:
         self._submitted = submitted
+        self._open_order_symbols = {
+            normalize_symbol(symbol) for symbol in (open_order_symbols or set())
+        }
         self.entries: list[EntryIntent] = []
         self.closes: list[str] = []
 
@@ -145,6 +152,9 @@ class FakeExecutor:
         return ExecutionOutcome(
             status=ExecutionStatus.SUBMITTED, client_order_id="cid", submitted=True
         )
+
+    def has_open_order(self, symbol: str) -> bool:
+        return normalize_symbol(symbol) in self._open_order_symbols
 
 
 class FakeAccount:
@@ -462,6 +472,37 @@ class TestOrchestrator:
         result = second.run_cycle(NOW)
         assert any(a.kind is ActionKind.SKIP_MAX_ENTRIES for a in result.actions)
         assert second_exec.entries == []  # no double entry after restart
+
+    def test_pending_entry_order_blocks_duplicate_after_restart(self, tmp_path: Path) -> None:
+        path = tmp_path / "daily_state.json"
+        first = make_orchestrator(
+            tmp_path,
+            snap=snapshot(),
+            strategy=FakeStrategy(entry=signal()),
+            executor=FakeExecutor(submitted=True),
+        )
+        first.run_cycle(NOW)
+        assert first.state.position_stops[KEY] == 99_350.0
+
+        second_exec = FakeExecutor(
+            submitted=True,
+            open_order_symbols={SYMBOL},
+        )
+        second = make_orchestrator(
+            tmp_path,
+            snap=snapshot(),
+            strategy=FakeStrategy(entry=signal()),
+            executor=second_exec,
+        )
+        assert path.exists()
+        result = second.run_cycle(NOW)
+
+        assert any(
+            a.kind is ActionKind.SKIP_OPEN_POSITION and "pending broker order" in a.detail
+            for a in result.actions
+        )
+        assert second_exec.entries == []
+        assert KEY in second.state.position_stops
 
     def test_account_error_is_fail_safe(self, tmp_path: Path) -> None:
         class BrokenAccount:
