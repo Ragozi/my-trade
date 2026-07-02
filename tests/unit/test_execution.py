@@ -76,6 +76,7 @@ class FakeBroker:
         transient_failures: int = 0,
         permanent_error: bool = False,
         existing: dict[str, OrderResult] | None = None,
+        open_orders: list[OrderResult] | None = None,
     ) -> None:
         self.submitted: list[OrderRequest] = []
         self.submit_calls = 0
@@ -84,6 +85,7 @@ class FakeBroker:
         self._transient_failures = transient_failures
         self._permanent_error = permanent_error
         self._existing = existing or {}
+        self._open_orders = open_orders or []
 
     def submit_order(self, request: OrderRequest) -> OrderResult:
         self.submit_calls += 1
@@ -96,6 +98,7 @@ class FakeBroker:
         return OrderResult(
             client_order_id=request.client_order_id,
             status=OrderStatus.ACCEPTED,
+            symbol=request.symbol,
             order_id="sim-order-1",
         )
 
@@ -106,7 +109,7 @@ class FakeBroker:
         self.cancelled.append(order_id)
 
     def list_open_orders(self) -> list[OrderResult]:
-        return []
+        return self._open_orders
 
     def close_position(self, symbol: str) -> OrderResult:
         self.closed.append(symbol)
@@ -349,6 +352,26 @@ class TestExecuteEntry:
         result = adapter.reconcile(cid)
         assert result is not None
         assert result.is_filled
+
+    def test_has_open_order_matches_symbol_only_for_working_orders(self) -> None:
+        adapter = make_adapter(
+            FakeBroker(
+                open_orders=[
+                    OrderResult(
+                        client_order_id="old",
+                        status=OrderStatus.CANCELED,
+                        symbol="BTC/USD",
+                    ),
+                    OrderResult(
+                        client_order_id="working",
+                        status=OrderStatus.ACCEPTED,
+                        symbol="AAPL",
+                    ),
+                ]
+            )
+        )
+        assert adapter.has_open_order("AAPL") is True
+        assert adapter.has_open_order("BTC/USD") is False
 
 
 # --------------------------------------------------------------------------- #
