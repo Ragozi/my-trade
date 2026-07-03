@@ -1,9 +1,9 @@
 """JSON persistence for ``DailyState`` (the only stateful I/O in monitoring).
 
 Kept deliberately simple and human-readable so the daily state file can be
-inspected/edited during paper trading. A corrupt or missing file degrades to
-``None`` (the orchestrator then starts from an empty state and rolls over on the
-first cycle) rather than crashing.
+inspected/edited during paper trading. A missing file is treated as first-run
+state; a malformed existing file fails closed so persisted risk anchors are not
+silently reset.
 """
 
 from __future__ import annotations
@@ -13,6 +13,10 @@ from datetime import date
 from pathlib import Path
 
 from .state import DailyState
+
+
+class DailyStateLoadError(RuntimeError):
+    """Raised when an existing daily-state file cannot be trusted."""
 
 
 class DailyStateStore:
@@ -40,8 +44,10 @@ class DailyStateStore:
                 halt_lesson_logged=bool(raw.get("halt_lesson_logged", False)),
                 broker_sod_equity=float(raw.get("broker_sod_equity", 0.0)),
             )
-        except (ValueError, KeyError, TypeError, OSError):
-            return None
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            raise DailyStateLoadError(
+                f"could not load daily state from {self._path}: {exc}"
+            ) from exc
 
     def save(self, state: DailyState) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
