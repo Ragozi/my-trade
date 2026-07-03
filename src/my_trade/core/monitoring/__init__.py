@@ -25,7 +25,7 @@ from .state import (
     rollover_if_new_day,
     update_peak,
 )
-from .store import DailyStateStore
+from .store import DailyStateLoadError, DailyStateStore
 
 __all__ = [
     "AccountProvider",
@@ -34,6 +34,7 @@ __all__ = [
     "CycleAction",
     "CycleResult",
     "DailyState",
+    "DailyStateLoadError",
     "DailyStateStore",
     "Executor",
     "HaltReason",

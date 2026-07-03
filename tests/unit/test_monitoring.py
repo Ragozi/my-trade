@@ -27,6 +27,7 @@ from my_trade.core.monitoring import (
     AccountSnapshot,
     ActionKind,
     DailyState,
+    DailyStateLoadError,
     DailyStateStore,
     HaltReason,
     Position,
@@ -306,10 +307,11 @@ class TestStore:
     def test_missing_file_returns_none(self, tmp_path: Path) -> None:
         assert DailyStateStore(tmp_path / "missing.json").load() is None
 
-    def test_corrupt_file_returns_none(self, tmp_path: Path) -> None:
+    def test_corrupt_file_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "bad.json"
         path.write_text("{ not json", encoding="utf-8")
-        assert DailyStateStore(path).load() is None
+        with pytest.raises(DailyStateLoadError):
+            DailyStateStore(path).load()
 
 
 # --------------------------------------------------------------------------- #
@@ -482,6 +484,21 @@ class TestOrchestrator:
         result = orch.run_cycle(NOW)
         assert result.halted is False
         assert any(a.kind is ActionKind.ERROR for a in result.actions)
+        assert executor.entries == []
+
+    def test_corrupt_daily_state_prevents_fail_open_entries(self, tmp_path: Path) -> None:
+        path = tmp_path / "daily_state.json"
+        path.write_text("{ not json", encoding="utf-8")
+        executor = FakeExecutor(submitted=True)
+
+        with pytest.raises(DailyStateLoadError):
+            make_orchestrator(
+                tmp_path,
+                snap=snapshot(equity=10_000.0),
+                strategy=FakeStrategy(entry=signal()),
+                executor=executor,
+            )
+
         assert executor.entries == []
 
     def test_session_closed_skips_entries(self, tmp_path: Path) -> None:
