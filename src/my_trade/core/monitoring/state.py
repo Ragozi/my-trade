@@ -55,12 +55,12 @@ def resolve_risk_equity(
     """Map broker equity to the balance used for sizing and halt checks.
 
     Returns ``(risk_equity, day_pnl, start_of_day_equity)``.
-    When ``trading_capital`` is set, day P&L is scaled proportionally from the
-    broker account so a 10% paper loss ≈ 10% virtual loss on ``trading_capital``.
+    When ``trading_capital`` is set, orders are already sized from that virtual
+    balance. Broker equity deltas therefore represent the strategy's dollar P&L
+    and must not be scaled down by the larger paper-account balance.
     """
     if trading_capital and trading_capital > 0 and state.broker_sod_equity > 0:
-        scale = trading_capital / state.broker_sod_equity
-        day_pnl = (broker_equity - state.broker_sod_equity) * scale
+        day_pnl = broker_equity - state.broker_sod_equity
         risk_equity = trading_capital + day_pnl
         return risk_equity, day_pnl, trading_capital
     start = state.start_of_day_equity if state.start_of_day_equity > 0 else broker_equity
