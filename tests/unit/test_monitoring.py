@@ -38,7 +38,7 @@ from my_trade.core.monitoring import (
     update_peak,
 )
 from my_trade.core.monitoring.state import entry_time_for
-from my_trade.core.risk import AccountState, RiskLimits
+from my_trade.core.risk import AccountState, RiskLimits, is_daily_loss_limit_hit
 from my_trade.core.strategy import OrderSide, ScanEvaluation, Signal
 from my_trade.data import normalize_symbol
 
@@ -271,20 +271,37 @@ class TestBuildAccountState:
         expected_stop = 100_000.0 * (1 - 0.0065)
         assert acct.open_risk_dollars == (100_000.0 - expected_stop) * 0.5
 
-    def test_trading_capital_scales_equity_and_pnl(self) -> None:
+    def test_trading_capital_applies_raw_strategy_pnl(self) -> None:
         state = DailyState(
             trading_day=TODAY,
             start_of_day_equity=15_000.0,
             peak_equity=15_000.0,
             broker_sod_equity=94_868.0,
         )
-        snap = snapshot(equity=93_868.0)  # -$1000 broker day
+        snap = snapshot(equity=93_868.0)  # -$1000 from risk-sized bot orders
         acct = build_account_state(
             snap, state, fallback_stop_pct=0.0065, trading_capital=15_000.0
         )
-        assert acct.equity == pytest.approx(15_000.0 - 1000 * (15_000 / 94_868))
+        assert acct.equity == pytest.approx(14_000.0)
         assert acct.start_of_day_equity == 15_000.0
-        assert acct.realized_day_pnl == pytest.approx(acct.equity - 15_000.0)
+        assert acct.realized_day_pnl == pytest.approx(-1_000.0)
+
+    def test_trading_capital_daily_loss_uses_virtual_dollar_threshold(self) -> None:
+        state = DailyState(
+            trading_day=TODAY,
+            start_of_day_equity=15_000.0,
+            peak_equity=15_000.0,
+            broker_sod_equity=100_000.0,
+        )
+        acct = build_account_state(
+            snapshot(equity=99_550.0),
+            state,
+            fallback_stop_pct=0.0065,
+            trading_capital=15_000.0,
+        )
+        assert acct.equity == pytest.approx(14_550.0)
+        assert acct.realized_day_pnl == pytest.approx(-450.0)
+        assert is_daily_loss_limit_hit(acct, limits(daily_loss_limit_pct=0.03)) is True
 
 
 # --------------------------------------------------------------------------- #

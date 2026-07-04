@@ -63,7 +63,7 @@ Full Telegram *dashboard* (inline status) is not built yet; use **Slack** or the
 
 When `TRADING_CAPITAL=15000` is set:
 
-- **Equity** on dashboard = virtual trading balance (~$15k + scaled day P&L)
+- **Equity** on dashboard = virtual trading balance (~$15k + strategy day P&L)
 - **Broker equity** = Alpaca paper account (shown on Risk page / account API as `broker_equity`)
 - **Risk page** shows dollar limits: ~$150/trade risk, ~$3k max position, ~$450 daily halt
 
