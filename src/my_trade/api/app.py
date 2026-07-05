@@ -8,12 +8,15 @@ and exposes state.
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from my_trade.api.bot_manager import (
@@ -40,6 +43,37 @@ from my_trade.data.stock_data import StockHistoricalDataProvider
 from my_trade.observability import Journal
 
 
+_ALLOWED_ORIGINS_ENV = "MY_TRADE_API_ALLOWED_ORIGINS"
+_LOOPBACK_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$"
+_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _configured_origins() -> set[str]:
+    raw = os.environ.get(_ALLOWED_ORIGINS_ENV, "")
+    return {origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()}
+
+
+def _is_loopback_origin(origin: str) -> bool:
+    parsed = urlparse(origin)
+    return parsed.scheme in {"http", "https"} and parsed.hostname in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }
+
+
+def _is_allowed_origin(origin: str) -> bool:
+    clean = origin.strip().rstrip("/")
+    return clean in _configured_origins() or _is_loopback_origin(clean)
+
+
+def _referer_origin(referer: str) -> str:
+    parsed = urlparse(referer)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 # Lazy import for one-shot actions to avoid circular imports at module load.
 def _paper_helpers() -> Any:
     from scripts import paper_trade as pt
@@ -51,11 +85,31 @@ def create_app() -> FastAPI:
     app = FastAPI(title="My-Trade API", version="1.0.0")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=list(_configured_origins()),
+        allow_origin_regex=_LOOPBACK_ORIGIN_REGEX,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def reject_cross_site_writes(request: Request, call_next: Any) -> Any:
+        if request.method in _UNSAFE_METHODS:
+            origin = request.headers.get("origin")
+            referer = request.headers.get("referer")
+            if origin:
+                allowed = _is_allowed_origin(origin)
+            elif referer:
+                allowed = _is_allowed_origin(_referer_origin(referer))
+            else:
+                # Non-browser local tools do not send Origin/Referer.
+                allowed = True
+            if not allowed:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Cross-origin write blocked"},
+                )
+        return await call_next(request)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

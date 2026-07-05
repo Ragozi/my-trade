@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from datetime import date
 
+from fastapi.testclient import TestClient
+
+from my_trade.api.app import create_app
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
 from my_trade.api.serializers import stats_from_events
 from my_trade.config import load_settings
@@ -36,6 +39,38 @@ class TestEnvPatch:
         out = merge_env_lines(text, {"ASSET_CLASS": "equities"})
         assert "ASSET_CLASS=equities" in out
         assert "PAPER_TRADING=true" in out
+
+
+class TestOperatorApiOriginProtection:
+    def test_cross_origin_bot_write_is_rejected(self) -> None:
+        client = TestClient(create_app())
+
+        res = client.post("/api/bot/stop", headers={"Origin": "https://evil.example"})
+
+        assert res.status_code == 403
+        assert res.json()["detail"] == "Cross-origin write blocked"
+
+    def test_loopback_origin_bot_write_is_allowed(self) -> None:
+        client = TestClient(create_app())
+
+        res = client.post("/api/bot/stop", headers={"Origin": "http://localhost:8080"})
+
+        assert res.status_code == 200
+
+    def test_local_non_browser_bot_write_is_allowed(self) -> None:
+        client = TestClient(create_app())
+
+        res = client.post("/api/bot/stop")
+
+        assert res.status_code == 200
+
+    def test_cors_does_not_allow_untrusted_read_origin(self) -> None:
+        client = TestClient(create_app())
+
+        res = client.get("/api/health", headers={"Origin": "https://evil.example"})
+
+        assert res.status_code == 200
+        assert "access-control-allow-origin" not in res.headers
 
 
 class TestSerializers:
