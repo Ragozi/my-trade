@@ -42,7 +42,6 @@ from my_trade.data.alpaca_movers import AlpacaMoversUniverse
 from my_trade.data.stock_data import StockHistoricalDataProvider
 from my_trade.observability import Journal
 
-
 _ALLOWED_ORIGINS_ENV = "MY_TRADE_API_ALLOWED_ORIGINS"
 _LOOPBACK_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$"
 _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
