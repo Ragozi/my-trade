@@ -74,6 +74,17 @@ def _referer_origin(referer: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def _browser_write_allowed(method: str, origin: str | None, referer: str | None) -> bool:
+    if method not in _UNSAFE_METHODS:
+        return True
+    if origin:
+        return _is_allowed_origin(origin)
+    if referer:
+        return _is_allowed_origin(_referer_origin(referer))
+    # Non-browser local tools do not send Origin/Referer.
+    return True
+
+
 # Lazy import for one-shot actions to avoid circular imports at module load.
 def _paper_helpers() -> Any:
     from scripts import paper_trade as pt
@@ -94,21 +105,15 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def reject_cross_site_writes(request: Request, call_next: Any) -> Any:
-        if request.method in _UNSAFE_METHODS:
-            origin = request.headers.get("origin")
-            referer = request.headers.get("referer")
-            if origin:
-                allowed = _is_allowed_origin(origin)
-            elif referer:
-                allowed = _is_allowed_origin(_referer_origin(referer))
-            else:
-                # Non-browser local tools do not send Origin/Referer.
-                allowed = True
-            if not allowed:
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Cross-origin write blocked"},
-                )
+        if not _browser_write_allowed(
+            request.method,
+            request.headers.get("origin"),
+            request.headers.get("referer"),
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Cross-origin write blocked"},
+            )
         return await call_next(request)
 
     @app.get("/api/health")

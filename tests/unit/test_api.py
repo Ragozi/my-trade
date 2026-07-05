@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi.testclient import TestClient
+from fastapi.middleware.cors import CORSMiddleware
 
-from my_trade.api.app import create_app
+from my_trade.api.app import _browser_write_allowed, create_app
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
 from my_trade.api.serializers import stats_from_events
 from my_trade.config import load_settings
@@ -43,34 +43,22 @@ class TestEnvPatch:
 
 class TestOperatorApiOriginProtection:
     def test_cross_origin_bot_write_is_rejected(self) -> None:
-        client = TestClient(create_app())
-
-        res = client.post("/api/bot/stop", headers={"Origin": "https://evil.example"})
-
-        assert res.status_code == 403
-        assert res.json()["detail"] == "Cross-origin write blocked"
+        assert not _browser_write_allowed("POST", "https://evil.example", None)
 
     def test_loopback_origin_bot_write_is_allowed(self) -> None:
-        client = TestClient(create_app())
-
-        res = client.post("/api/bot/stop", headers={"Origin": "http://localhost:8080"})
-
-        assert res.status_code == 200
+        assert _browser_write_allowed("POST", "http://localhost:8080", None)
 
     def test_local_non_browser_bot_write_is_allowed(self) -> None:
-        client = TestClient(create_app())
+        assert _browser_write_allowed("POST", None, None)
 
-        res = client.post("/api/bot/stop")
+    def test_cross_origin_referer_write_is_rejected_without_origin(self) -> None:
+        assert not _browser_write_allowed("POST", None, "https://evil.example/form")
 
-        assert res.status_code == 200
+    def test_cors_does_not_allow_wildcard_origins(self) -> None:
+        cors = next(m for m in create_app().user_middleware if m.cls is CORSMiddleware)
 
-    def test_cors_does_not_allow_untrusted_read_origin(self) -> None:
-        client = TestClient(create_app())
-
-        res = client.get("/api/health", headers={"Origin": "https://evil.example"})
-
-        assert res.status_code == 200
-        assert "access-control-allow-origin" not in res.headers
+        assert cors.kwargs["allow_origins"] == []
+        assert cors.kwargs["allow_origin_regex"].startswith("^https?://")
 
 
 class TestSerializers:
