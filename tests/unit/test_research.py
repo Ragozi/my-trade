@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 import pytest
 
 from my_trade.config import load_settings
+from my_trade.core.models import OrderSide
 from my_trade.core.monitoring.models import ActionKind
 from my_trade.core.monitoring.orchestrator import TradingOrchestrator
 from my_trade.core.monitoring.store import DailyStateStore
 from my_trade.core.risk import RiskLimits
 from my_trade.core.strategy.models import ScanEvaluation, Signal
-from my_trade.core.models import OrderSide
 from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
 from my_trade.research.client import MockClaudeResearchClient, extract_json_object
 from my_trade.research.context import build_research_context
@@ -215,7 +215,10 @@ def test_require_approval_blocks_unlisted_symbol(monkeypatch: pytest.MonkeyPatch
         research_advisor=advisor,
     )
     result = orch.run_cycle(datetime(2026, 6, 20, 15, 0, tzinfo=UTC))
-    assert any(a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT" for a in result.actions)
+    assert any(
+        a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT"
+        for a in result.actions
+    )
     assert not any(a.kind is ActionKind.ENTRY_SUBMITTED for a in result.actions)
 
 
@@ -292,6 +295,51 @@ def test_premium_fallback_when_claude_off() -> None:
     assert isinstance(advisor, CompositeResearchAdvisor)
     assert [t[0] for t in advisor._tiers] == ["premium", "openai"]
     assert advisor.allows_entry("AAPL", ClaudeProposal()) is True
+
+
+def test_workhorse_only_requires_configured_workhorse_tier() -> None:
+    from my_trade.research.factory import build_research_advisor, research_is_active
+
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "true",
+            "ENABLE_CLAUDE": "false",
+            "RESEARCH_TIER_MODE": "workhorse_only",
+            "RESEARCH_WORKHORSE_PROVIDER": "none",
+            "RESEARCH_PREMIUM_PROVIDER": "xai",
+            "XAI_API_KEY": "xai-test",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    assert s.research.enabled is True
+    assert research_is_active(s) is False
+    assert build_research_advisor(s) is None
+    with pytest.raises(ValueError, match="excludes all configured research tiers"):
+        s.validate_for_trading()
+
+
+def test_claude_only_requires_configured_premium_or_claude_tier() -> None:
+    from my_trade.research.factory import build_research_advisor, research_is_active
+
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "true",
+            "ENABLE_CLAUDE": "false",
+            "RESEARCH_TIER_MODE": "claude_only",
+            "RESEARCH_WORKHORSE_PROVIDER": "openai",
+            "OPENAI_API_KEY": "sk-test",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    assert s.research.enabled is True
+    assert research_is_active(s) is False
+    assert build_research_advisor(s) is None
+    with pytest.raises(ValueError, match="excludes all configured research tiers"):
+        s.validate_for_trading()
 
 
 def test_build_research_brief_from_empty_journal(tmp_path) -> None:

@@ -27,6 +27,7 @@ DEFAULT_EQUITY_SYMBOLS = "AAPL,MSFT,TSLA,NVDA,AMD"
 ASSET_CLASS_CRYPTO = "crypto"
 ASSET_CLASS_EQUITIES = "equities"
 VALID_ASSET_CLASSES = (ASSET_CLASS_CRYPTO, ASSET_CLASS_EQUITIES)
+VALID_RESEARCH_TIER_MODES = ("workhorse_only", "claude_only", "both")
 
 
 @dataclass(frozen=True)
@@ -258,6 +259,17 @@ class ResearchSettings:
     def any_tier_enabled(self) -> bool:
         return self.claude_enabled or self.workhorse.is_active or self.premium_active
 
+    @property
+    def selected_tier_enabled(self) -> bool:
+        """True when RESEARCH_TIER_MODE leaves at least one configured tier runnable."""
+        if self.tier_mode == "workhorse_only":
+            return self.workhorse.is_active
+        if self.tier_mode == "claude_only":
+            return self.claude_enabled or self.premium_active
+        if self.tier_mode == "both":
+            return self.any_tier_enabled
+        return False
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -286,6 +298,12 @@ class Settings:
             )
         if not self.symbols:
             raise ValueError("at least one symbol is required")
+        rc = self.research
+        if rc.tier_mode not in VALID_RESEARCH_TIER_MODES:
+            raise ValueError(
+                "RESEARCH_TIER_MODE must be one of "
+                f"{VALID_RESEARCH_TIER_MODES}, got {rc.tier_mode!r}"
+            )
 
     def validate_for_trading(self) -> None:
         """Stricter checks required before any order can be placed."""
@@ -300,6 +318,10 @@ class Settings:
         if rc.claude_enabled and not rc.api_key:
             raise ValueError(
                 "ENABLE_CLAUDE=true requires ANTHROPIC_API_KEY in .env"
+            )
+        if rc.enabled and not rc.selected_tier_enabled:
+            raise ValueError(
+                f"RESEARCH_TIER_MODE={rc.tier_mode!r} excludes all configured research tiers"
             )
         wh = rc.workhorse
         if wh.provider == "openai" and not wh.openai_api_key:

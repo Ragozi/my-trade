@@ -239,8 +239,6 @@ def build_postmortem_client(
 def research_is_active(settings: Settings) -> bool:
     """True when any research tier will run for the current asset class."""
     rc = settings.research
-    if not rc.enabled or not rc.any_tier_enabled:
+    if not rc.enabled or not rc.selected_tier_enabled:
         return False
-    if rc.equities_only and not settings.is_equities:
-        return False
-    return True
+    return not (rc.equities_only and not settings.is_equities)
