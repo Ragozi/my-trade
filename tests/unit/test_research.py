@@ -294,6 +294,51 @@ def test_premium_fallback_when_claude_off() -> None:
     assert advisor.allows_entry("AAPL", ClaudeProposal()) is True
 
 
+def test_workhorse_only_requires_configured_workhorse_tier() -> None:
+    from my_trade.research.factory import build_research_advisor, research_is_active
+
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "true",
+            "ENABLE_CLAUDE": "false",
+            "RESEARCH_TIER_MODE": "workhorse_only",
+            "RESEARCH_WORKHORSE_PROVIDER": "none",
+            "RESEARCH_PREMIUM_PROVIDER": "xai",
+            "XAI_API_KEY": "xai-test",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    assert s.research.enabled is True
+    assert research_is_active(s) is False
+    assert build_research_advisor(s) is None
+    with pytest.raises(ValueError, match="excludes all configured research tiers"):
+        s.validate_for_trading()
+
+
+def test_claude_only_requires_configured_premium_or_claude_tier() -> None:
+    from my_trade.research.factory import build_research_advisor, research_is_active
+
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "true",
+            "ENABLE_CLAUDE": "false",
+            "RESEARCH_TIER_MODE": "claude_only",
+            "RESEARCH_WORKHORSE_PROVIDER": "openai",
+            "OPENAI_API_KEY": "sk-test",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    assert s.research.enabled is True
+    assert research_is_active(s) is False
+    assert build_research_advisor(s) is None
+    with pytest.raises(ValueError, match="excludes all configured research tiers"):
+        s.validate_for_trading()
+
+
 def test_build_research_brief_from_empty_journal(tmp_path) -> None:
     from my_trade.research.brief import build_research_brief, save_brief
 
