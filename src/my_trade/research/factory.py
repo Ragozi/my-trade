@@ -241,6 +241,4 @@ def research_is_active(settings: Settings) -> bool:
     rc = settings.research
     if not rc.enabled or not rc.selected_tier_enabled:
         return False
-    if rc.equities_only and not settings.is_equities:
-        return False
-    return True
+    return not (rc.equities_only and not settings.is_equities)
