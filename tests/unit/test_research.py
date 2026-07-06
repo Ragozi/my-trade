@@ -7,10 +7,10 @@ from datetime import UTC, datetime
 import pytest
 
 from my_trade.config import load_settings
+from my_trade.core.models import OrderSide
 from my_trade.core.monitoring.models import ActionKind
 from my_trade.core.monitoring.orchestrator import TradingOrchestrator
 from my_trade.core.monitoring.store import DailyStateStore
-from my_trade.core.models import OrderSide
 from my_trade.core.risk import RiskLimits
 from my_trade.core.strategy.models import ScanEvaluation, Signal
 from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
