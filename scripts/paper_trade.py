@@ -28,7 +28,7 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from my_trade.api.bot_manager import record_cycle  # noqa: E402
+from my_trade.api.bot_manager import pid_path, record_cycle  # noqa: E402
 from my_trade.config import Settings, load_settings  # noqa: E402
 from my_trade.core.execution import (  # noqa: E402
     EntryIntent,
@@ -610,6 +610,7 @@ def run_loop(settings: Settings) -> int:
         ",".join(settings.symbols),
         interval,
     )
+    pid_path(settings.runtime.log_dir).write_text(str(os.getpid()), encoding="utf-8")
     last_day: datetime | None = None
     cycle_count = 0
     try:
@@ -646,6 +647,7 @@ def run_loop(settings: Settings) -> int:
     except KeyboardInterrupt:
         log.info("Shutdown requested; exiting cleanly (open positions left intact).")
     finally:
+        pid_path(settings.runtime.log_dir).unlink(missing_ok=True)
         journal.close()
     return 0
 
