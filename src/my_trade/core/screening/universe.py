@@ -55,3 +55,31 @@ class StaticUniverseSource:
 
     def symbols(self) -> Sequence[str]:
         return self._symbols
+
+
+class MergedUniverseSource:
+    """Union of multiple universe sources with de-duplication and exclusions."""
+
+    def __init__(
+        self,
+        *sources: UniverseSource,
+        exclude: frozenset[str] = frozenset(),
+    ) -> None:
+        self._sources = sources
+        self._exclude = exclude
+
+    def symbols(self) -> Sequence[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for source in self._sources:
+            try:
+                batch = source.symbols()
+            except Exception:
+                continue
+            for sym in batch:
+                key = sym.strip().upper()
+                if not key or key in seen or key in self._exclude:
+                    continue
+                seen.add(key)
+                out.append(sym.strip())
+        return tuple(out)

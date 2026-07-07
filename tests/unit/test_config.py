@@ -181,3 +181,11 @@ class TestAssetClass:
         assert s.screener.movers_source == "gainers"
         assert s.screener.movers_top == 15
         assert s.screener.movers_min_volume == pytest.approx(100000.0)
+
+    def test_screener_seed_and_merge_defaults(self) -> None:
+        s = load_settings(env={"USE_SCREENER": "true"})
+        assert "NVDA" in s.screener.seed_symbols
+        assert "SYM" in s.screener.seed_symbols
+        assert s.screener.merge_seed_with_movers is True
+        assert s.screener.exclude_leveraged_etfs is True
+        assert s.screener.min_price == pytest.approx(5.0)

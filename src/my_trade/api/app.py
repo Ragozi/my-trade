@@ -42,7 +42,8 @@ from my_trade.core.monitoring import DailyStateStore
 from my_trade.core.monitoring.alpaca_account import AlpacaAccountProvider
 from my_trade.core.screening import Screener, StaticUniverseSource
 from my_trade.data.alpaca_data import AlpacaDataProvider
-from my_trade.data.alpaca_movers import AlpacaMoversUniverse
+from my_trade.core.screening.build import build_equities_universe
+from my_trade.core.screening.universe import StaticUniverseSource
 from my_trade.data.stock_data import StockHistoricalDataProvider
 from my_trade.observability import Journal
 
@@ -282,18 +283,10 @@ def create_app() -> FastAPI:
                     memory_file=settings.research.memory_file,
                 ),
             )
-        if settings.is_equities and sc.use_movers:
-            universe: Any = AlpacaMoversUniverse(
-                settings.alpaca.api_key,
-                settings.alpaca.api_secret,
-                source=sc.movers_source,
-                top=sc.movers_top,
-                min_volume=sc.movers_min_volume,
-            )
-            source = f"movers:{sc.movers_source}"
+        if settings.is_equities:
+            universe, source = build_equities_universe(settings)
         else:
-            static = settings.symbols if settings.is_equities else sc.universe
-            universe = StaticUniverseSource(static)
+            universe = StaticUniverseSource(sc.universe)
             source = "static"
         data: Any = (
             StockHistoricalDataProvider.from_settings(settings)

@@ -116,6 +116,8 @@ class ResearchContext(BaseModel):
     comparison_summary: ComparisonSummary | None = None
     daily_brief: dict[str, Any] | None = None
     trade_knowledge: tuple[dict[str, Any], ...] = ()
+    technical_scans: tuple[dict[str, Any], ...] = ()
+    recent_news: tuple[dict[str, Any], ...] = ()
 
     @field_validator("candidate_symbols", mode="before")
     @classmethod

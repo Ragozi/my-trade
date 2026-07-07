@@ -55,7 +55,7 @@ from my_trade.core.screening import (  # noqa: E402
 from my_trade.core.strategy import PullbackStrategy, StrategyParams  # noqa: E402
 from my_trade.data import MarketDataProvider  # noqa: E402
 from my_trade.data.alpaca_data import AlpacaDataProvider  # noqa: E402
-from my_trade.data.alpaca_movers import AlpacaMoversUniverse  # noqa: E402
+from my_trade.core.screening.build import build_equities_universe  # noqa: E402
 from my_trade.data.stock_data import StockHistoricalDataProvider  # noqa: E402
 from my_trade.observability import Journal  # noqa: E402
 from my_trade.research import (
@@ -159,19 +159,11 @@ def build_screener(settings: Settings, data: object) -> Screener | None:
         return None
 
     universe: UniverseSource
-    if settings.is_equities and sc.use_movers:
-        universe = AlpacaMoversUniverse(
-            settings.alpaca.api_key,
-            settings.alpaca.api_secret,
-            source=sc.movers_source,
-            top=sc.movers_top,
-            min_volume=sc.movers_min_volume,
-        )
-        source_desc = f"alpaca-movers({sc.movers_source}, top={sc.movers_top})"
+    if settings.is_equities:
+        universe, source_desc = build_equities_universe(settings)
     else:
-        static_symbols = settings.symbols if settings.is_equities else sc.universe
-        universe = StaticUniverseSource(static_symbols)
-        source_desc = f"static({len(tuple(static_symbols))} symbols)"
+        universe = StaticUniverseSource(sc.universe)
+        source_desc = f"static({len(sc.universe)} symbols)"
 
     screener = Screener(
         data=data,  # type: ignore[arg-type]
@@ -275,6 +267,7 @@ def build_orchestrator(
         trend_timeframe_15m=settings.runtime.trend_timeframe_15m,
         bar_limit=settings.runtime.bar_limit,
         max_entries_per_symbol_per_day=settings.risk.max_entries_per_symbol_per_day,
+        max_daily_entries=settings.risk.max_daily_entries,
         fallback_stop_pct=settings.strategy.stop_loss_pct,
         trading_capital=settings.risk.trading_capital or None,
         watchlist=screener.select if screener is not None else None,
@@ -285,6 +278,8 @@ def build_orchestrator(
         trade_knowledge=trade_knowledge,  # type: ignore[arg-type]
         journal_path=settings.runtime.journal_db,
         research_brief_file=settings.research.brief_file,
+        news_api_key=settings.alpaca.api_key if settings.is_equities else "",
+        news_api_secret=settings.alpaca.api_secret if settings.is_equities else "",
     )
 
 

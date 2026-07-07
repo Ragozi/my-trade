@@ -63,6 +63,7 @@ class ExecutionAdapter:
         default_time_in_force: TimeInForce = TimeInForce.GTC,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], datetime] = _utcnow,
+        cancel_settle_seconds: float = 0.5,
     ) -> None:
         if mode is ExecutionMode.LIVE and not allow_live:
             raise ValueError(
@@ -76,6 +77,7 @@ class ExecutionAdapter:
         self._default_tif = default_time_in_force
         self._sleep = sleep
         self._clock = clock
+        self._cancel_settle_seconds = max(0.0, cancel_settle_seconds)
 
     @property
     def mode(self) -> ExecutionMode:
@@ -187,7 +189,11 @@ class ExecutionAdapter:
         """
         when = now or self._clock()
         client_order_id = make_client_order_id(symbol, OrderIntent.EXIT, when)
-        self._cancel_open_orders_for_symbol(symbol)
+        if (
+            self._cancel_open_orders_for_symbol(symbol) > 0
+            and self._cancel_settle_seconds > 0
+        ):
+            self._sleep(self._cancel_settle_seconds)
         try:
             result: OrderResult = with_retries(
                 lambda: self._broker.close_position(symbol),
@@ -208,13 +214,14 @@ class ExecutionAdapter:
             order=result,
         )
 
-    def _cancel_open_orders_for_symbol(self, symbol: str) -> None:
+    def _cancel_open_orders_for_symbol(self, symbol: str) -> int:
         """Best-effort cancel of working orders that block a market close."""
         target = normalize_symbol(symbol)
+        cancelled = 0
         try:
             open_orders = self._broker.list_open_orders()
         except BrokerError:
-            return
+            return 0
         for order in open_orders:
             if not order.order_id:
                 continue
@@ -223,8 +230,10 @@ class ExecutionAdapter:
                 continue
             try:
                 self._broker.cancel_order(order.order_id)
+                cancelled += 1
             except BrokerError:
                 continue
+        return cancelled
 
     def reconcile(self, client_order_id: str) -> OrderResult | None:
         """Fetch the current broker state for a previously-submitted order."""

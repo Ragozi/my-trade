@@ -38,6 +38,7 @@ def limits(**overrides: float | int) -> RiskLimits:
         "daily_loss_limit_pct": 0.05,
         "max_drawdown_pct": 0.15,
         "max_concurrent_positions": 1,
+        "max_notional_pct": 1.0,
     }
     base.update(overrides)
     return RiskLimits(**base)  # type: ignore[arg-type]
@@ -255,8 +256,8 @@ class TestExecuteEntry:
         sent = broker.submitted[0]
         assert sent.is_bracket
         assert sent.client_order_id == outcome.client_order_id
-        # qty sized by the risk engine: $240 risk / $650 stop distance.
-        assert sent.qty == pytest.approx(240.0 / 650.0)
+        # qty sized by risk engine, capped at 100% notional on $100k BTC ($12k equity).
+        assert sent.qty == pytest.approx(12_000.0 / ENTRY)
 
     def test_circuit_breaker_blocks_submission(self) -> None:
         broker = FakeBroker()
@@ -367,6 +368,27 @@ class TestExecuteEntry:
         assert broker.cancelled == ["stop-1"]
         assert broker.closed == ["MSFT"]
 
+    def test_close_position_waits_after_cancel(self) -> None:
+        slept: list[float] = []
+        broker = FakeBroker(
+            open_orders=[
+                OrderResult(
+                    client_order_id="bracket-stop",
+                    status=OrderStatus.ACCEPTED,
+                    order_id="stop-1",
+                    symbol="MSFT",
+                ),
+            ]
+        )
+        adapter = ExecutionAdapter(
+            broker,
+            limits(),
+            sleep=slept.append,
+            cancel_settle_seconds=0.5,
+        )
+        adapter.close_position("MSFT", now=NOW)
+        assert slept == [0.5]
+
     def test_reconcile_returns_existing(self) -> None:
         cid = "mt-entry-BTCUSD-20260618T1407"
         existing = {cid: OrderResult(client_order_id=cid, status=OrderStatus.FILLED)}
@@ -391,7 +413,7 @@ class TestEquitiesExecution:
         adapter = make_adapter(broker, whole_shares=True)
         outcome = adapter.execute_entry(self._equity_intent(), account(), now=NOW)
         assert outcome.status is ExecutionStatus.SUBMITTED
-        assert broker.submitted[0].qty == 240.0  # floored to whole shares
+        assert broker.submitted[0].qty == 120.0  # capped at 100% notional ($12k / $100)
 
     def test_whole_shares_rounding_to_zero_is_invalid(self) -> None:
         # $240 risk budget / $650 stop distance => 0.369 shares -> floors to 0.
@@ -417,7 +439,7 @@ class TestEquitiesExecution:
         broker = FakeBroker()
         outcome = make_adapter(broker).execute_entry(intent(), account(), now=NOW)
         assert outcome.status is ExecutionStatus.SUBMITTED
-        assert broker.submitted[0].qty == pytest.approx(240.0 / 650.0)
+        assert broker.submitted[0].qty == pytest.approx(12_000.0 / ENTRY)
         assert broker.submitted[0].time_in_force is TimeInForce.GTC
 
 

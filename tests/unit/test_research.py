@@ -274,6 +274,7 @@ def test_premium_fallback_when_claude_off() -> None:
         {
             "ENABLE_RESEARCH": "true",
             "ENABLE_CLAUDE": "false",
+            "CLAUDE_REQUIRE_APPROVAL": "false",
             "RESEARCH_WORKHORSE_PROVIDER": "openai",
             "RESEARCH_PREMIUM_PROVIDER": "xai",
             "OPENAI_API_KEY": "sk-test",

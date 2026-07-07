@@ -361,9 +361,9 @@ class TestOrchestratorWatchlist:
         orch.run_cycle(NOW)
         assert strategy.scanned == ["BTC/USD"]  # fell back to configured symbols
 
-    def test_empty_watchlist_scans_nothing(self, tmp_path: Path) -> None:
+    def test_empty_watchlist_falls_back_to_static_symbols(self, tmp_path: Path) -> None:
         strategy = _OrchStrategy()
         orch = _orchestrator(tmp_path, strategy, lambda: [])
         result = orch.run_cycle(NOW)
-        assert strategy.scanned == []
-        assert not any(a.kind is ActionKind.NO_SIGNAL for a in result.actions)
+        assert strategy.scanned == ["BTC/USD"]
+        assert any(a.kind is ActionKind.NO_SIGNAL for a in result.actions)

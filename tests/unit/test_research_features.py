@@ -218,7 +218,7 @@ def test_orchestrator_records_evaluation_on_entry(tmp_path) -> None:
         execution=_StubExecution(),
         account=_StubAccount(),
         store=DailyStateStore(tmp_path / "daily.json"),
-        limits=RiskLimits(),
+        limits=RiskLimits(max_concurrent_positions=3),
         symbols=("NVDA", "AAPL"),
         asset_class="equities",
         session_is_open=lambda _now: True,

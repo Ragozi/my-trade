@@ -30,6 +30,7 @@ from my_trade.core.risk import (
     RiskLimits,
     is_circuit_breaker_tripped,
     is_daily_loss_limit_hit,
+    is_daily_profit_target_hit,
 )
 from my_trade.data import MarketDataProvider, normalize_symbol
 from my_trade.research.models import ClaudeProposal
@@ -109,6 +110,7 @@ class TradingOrchestrator:
         trend_timeframe_15m: str = "15Min",
         bar_limit: int = 200,
         max_entries_per_symbol_per_day: int = 10,
+        max_daily_entries: int = 2,
         fallback_stop_pct: float = 0.0065,
         asset_class: str = "crypto",
         trading_capital: float | None = None,
@@ -120,6 +122,8 @@ class TradingOrchestrator:
         trade_knowledge: TradeKnowledgeStore | None = None,
         journal_path: str | None = None,
         research_brief_file: str | None = None,
+        news_api_key: str = "",
+        news_api_secret: str = "",
         clock: Callable[[], datetime] = _utcnow,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -138,11 +142,14 @@ class TradingOrchestrator:
         self._trade_knowledge = trade_knowledge
         self._journal_path = journal_path
         self._research_brief_file = research_brief_file
+        self._news_api_key = news_api_key
+        self._news_api_secret = news_api_secret
         self._entry_tf = entry_timeframe
         self._trend_tf = trend_timeframe
         self._trend_tf_15m = trend_timeframe_15m
         self._bar_limit = bar_limit
         self._max_entries = max_entries_per_symbol_per_day
+        self._max_daily_entries = max_daily_entries
         self._fallback_stop_pct = fallback_stop_pct
         self._asset_class = asset_class
         self._trading_capital = trading_capital if trading_capital and trading_capital > 0 else None
@@ -194,8 +201,8 @@ class TradingOrchestrator:
             self._log.warning("watchlist failed, using static symbols: %s", exc)
             return self._symbols
         if not selected:
-            self._log.debug("watchlist empty this cycle; nothing to scan")
-            return ()
+            self._log.debug("watchlist empty; falling back to static symbols")
+            return self._symbols
         return selected
 
     def run_cycle(self, now: datetime | None = None) -> CycleResult:
@@ -328,6 +335,8 @@ class TradingOrchestrator:
             return HaltReason.CIRCUIT_BREAKER
         if is_daily_loss_limit_hit(account_state, self._limits):
             return HaltReason.DAILY_LOSS_LIMIT
+        if is_daily_profit_target_hit(account_state, self._limits):
+            return HaltReason.DAILY_PROFIT_TARGET
         return None
 
     def _manage_exits(self, snapshot: AccountSnapshot, when: datetime) -> list[CycleAction]:
@@ -523,8 +532,29 @@ class TradingOrchestrator:
             trade_knowledge = tuple(
                 self._trade_knowledge.recent_for_prompt(
                     symbols=candidates,
-                    limit=15,
+                    limit=25,
                 )
+            )
+
+        from my_trade.research.news import fetch_recent_news
+        from my_trade.research.technical import gather_technical_scans
+
+        technical_scans = gather_technical_scans(
+            symbols=tuple(candidates),
+            strategy=self._strategy,
+            get_bars=self._get_bars,
+            entry_tf=self._entry_tf,
+            trend_tf=self._trend_tf,
+            trend_tf_15m=self._trend_tf_15m,
+            when=when,
+        )
+        recent_news: tuple[dict[str, object], ...] = ()
+        if self._asset_class == "equities" and self._news_api_key and self._news_api_secret:
+            recent_news = fetch_recent_news(
+                candidates,
+                api_key=self._news_api_key,
+                api_secret=self._news_api_secret,
+                as_of=when,
             )
 
         context = build_research_context(
@@ -542,6 +572,8 @@ class TradingOrchestrator:
             comparison_summary=comparison_summary,
             daily_brief=daily_brief,
             trade_knowledge=trade_knowledge,
+            technical_scans=technical_scans,
+            recent_news=recent_news,
         )
         result = self._research.propose(context, when=when)
         proposal = result.proposal
@@ -598,6 +630,15 @@ class TradingOrchestrator:
             if isinstance(research_proposal, ClaudeProposal)
             else None
         )
+        if self._state.total_entries_today() >= self._max_daily_entries:
+            actions.append(
+                CycleAction(
+                    ActionKind.SKIP_MAX_ENTRIES,
+                    "",
+                    f"daily_entries={self._state.total_entries_today()} max={self._max_daily_entries}",
+                )
+            )
+            return actions
         for symbol in self._active_symbols():
             sym = normalize_symbol(symbol)
             if sym not in open_symbols and sym in self._state.position_stops:

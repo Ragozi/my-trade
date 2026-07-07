@@ -24,6 +24,7 @@ from my_trade.core.risk import (
     evaluate_trade,
     is_circuit_breaker_tripped,
     is_daily_loss_limit_hit,
+    is_daily_profit_target_hit,
     position_size,
 )
 
@@ -155,6 +156,32 @@ class TestDailyLossLimit:
         # SOD equity 12_000 -> threshold -600 regardless of intraday equity.
         acct = healthy_account(equity=9_000.0, realized_day_pnl=-600.0)
         assert is_daily_loss_limit_hit(acct, default_limits()) is True
+
+
+class TestDailyProfitTarget:
+    def test_disabled_when_zero(self) -> None:
+        acct = healthy_account(realized_day_pnl=500.0)
+        assert is_daily_profit_target_hit(acct, default_limits()) is False
+
+    def test_hit_at_target(self) -> None:
+        lim = RiskLimits(
+            max_risk_per_trade_pct=0.02,
+            max_total_open_risk_pct=0.07,
+            daily_loss_limit_pct=0.05,
+            daily_profit_target_pct=0.01,
+            max_drawdown_pct=0.15,
+            max_concurrent_positions=1,
+            max_notional_pct=0.25,
+        )
+        acct = AccountState(
+            equity=12_120.0,
+            start_of_day_equity=12_000.0,
+            peak_equity=12_120.0,
+            realized_day_pnl=120.0,
+            open_positions=0,
+            open_risk_dollars=0.0,
+        )
+        assert is_daily_profit_target_hit(acct, lim) is True
 
 
 # --------------------------------------------------------------------------- #

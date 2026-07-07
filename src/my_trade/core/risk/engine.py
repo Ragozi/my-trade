@@ -94,6 +94,14 @@ def is_daily_loss_limit_hit(account: AccountState, limits: RiskLimits) -> bool:
     return account.realized_day_pnl <= threshold + _EPS
 
 
+def is_daily_profit_target_hit(account: AccountState, limits: RiskLimits) -> bool:
+    """True when day P&L >= daily_profit_target_pct × SOD equity (0 pct = disabled)."""
+    if limits.daily_profit_target_pct <= 0:
+        return False
+    target = limits.daily_profit_target_pct * account.start_of_day_equity
+    return account.realized_day_pnl >= target - _EPS
+
+
 def is_circuit_breaker_tripped(account: AccountState, limits: RiskLimits) -> bool:
     """R4: True when equity <= (1 - max_drawdown_pct) * peak_equity."""
     floor = (1.0 - limits.max_drawdown_pct) * account.peak_equity

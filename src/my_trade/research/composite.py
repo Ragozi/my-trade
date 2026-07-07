@@ -108,6 +108,7 @@ class CompositeResearchAdvisor:
             block_hold=self._config.block_hold_for_entry,
             require_long_approval=self._config.require_approval_for_entry,
             sticky_idea=sticky_idea,
+            entry_veto_min_confidence=self._config.entry_veto_min_confidence,
         )
 
     def entry_veto_reason(
@@ -127,4 +128,5 @@ class CompositeResearchAdvisor:
             block_hold=self._config.block_hold_for_entry,
             require_long_approval=self._config.require_approval_for_entry,
             sticky_idea=sticky_idea,
+            entry_veto_min_confidence=self._config.entry_veto_min_confidence,
         )

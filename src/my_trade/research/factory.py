@@ -20,6 +20,7 @@ def _shared_research_config(settings: Settings) -> ResearchConfig:
         enabled=True,
         model=rc.model,
         min_confidence=rc.min_confidence,
+        entry_veto_min_confidence=rc.entry_veto_min_confidence,
         max_ideas_per_cycle=rc.max_ideas_per_cycle,
         require_approval_for_entry=rc.require_approval_for_entry,
         block_avoid_for_entry=rc.block_avoid_for_entry,

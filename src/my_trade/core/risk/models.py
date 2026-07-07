@@ -20,6 +20,7 @@ class RiskLimits:
     max_risk_per_trade_pct: float = 0.02   # R1
     max_total_open_risk_pct: float = 0.07  # R2
     daily_loss_limit_pct: float = 0.05     # R3
+    daily_profit_target_pct: float = 0.0   # halt new entries when day P&L >= this × SOD (0=off)
     max_drawdown_pct: float = 0.15         # R4
     max_concurrent_positions: int = 1
     max_notional_pct: float = 0.25  # max position value as fraction of equity

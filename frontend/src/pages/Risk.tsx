@@ -24,13 +24,15 @@ export default function Risk() {
   const dayPnl = account?.day_pnl ?? 0;
 
   const dayLossPct = dayStartEquity ? Math.max(0, -dayPnl / dayStartEquity) * 100 : 0;
+  const dayGainPct = dayStartEquity && dayPnl > 0 ? (dayPnl / dayStartEquity) * 100 : 0;
   const drawdownPct = peak ? Math.max(0, (peak - equity) / peak) * 100 : 0;
 
   const limits = cfg?.risk;
   const cap = tradingCapital > 0 ? tradingCapital : equity;
-  const maxRiskUsd = cap * (limits?.max_risk_per_trade_pct ?? 0.01);
-  const maxPosUsd = cap * (limits?.max_notional_pct ?? 0.2);
-  const dailyHaltUsd = cap * (limits?.daily_loss_limit_pct ?? 0.03);
+  const maxRiskUsd = cap * (limits?.max_risk_per_trade_pct ?? 0.02);
+  const maxPosUsd = cap * (limits?.max_notional_pct ?? 0.4);
+  const dailyHaltUsd = cap * (limits?.daily_loss_limit_pct ?? 0.01);
+  const dailyTargetUsd = cap * (limits?.daily_profit_target_pct ?? 0.01);
 
   return (
     <div>
@@ -63,8 +65,15 @@ export default function Risk() {
         <LimitCard
           title="Day P&L vs daily loss limit"
           current={dayLossPct}
-          limit={pct(limits?.daily_loss_limit_pct, 0.03)}
+          limit={pct(limits?.daily_loss_limit_pct, 0.01)}
           subLeft={`Day P&L: ${fmtUsd(dayPnl)} · halt ~${fmtUsd(-dailyHaltUsd)}`}
+        />
+        <LimitCard
+          title="Day P&L vs profit target"
+          current={dayGainPct}
+          limit={pct(limits?.daily_profit_target_pct, 0.01)}
+          subLeft={`Target: ${fmtUsd(dailyTargetUsd)} · locks green days`}
+          gainMode
         />
         <LimitCard
           title="Drawdown from peak"
@@ -80,14 +89,16 @@ export default function Risk() {
         />
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-display">Slow &amp; steady limits</CardTitle>
+            <CardTitle className="text-sm font-display">Growth limits</CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-3 text-xs font-data">
-            <Row label="Per trade" value={fmtPct(pct(limits?.max_risk_per_trade_pct, 0.01))} />
-            <Row label="Max position" value={fmtPct(pct(limits?.max_notional_pct, 0.2))} />
-            <Row label="Daily loss" value={fmtPct(pct(limits?.daily_loss_limit_pct, 0.03))} />
+            <Row label="Per trade" value={fmtPct(pct(limits?.max_risk_per_trade_pct, 0.02))} />
+            <Row label="Max position" value={fmtPct(pct(limits?.max_notional_pct, 0.4))} />
+            <Row label="Daily loss" value={fmtPct(pct(limits?.daily_loss_limit_pct, 0.01))} />
+            <Row label="Daily target" value={fmtPct(pct(limits?.daily_profit_target_pct, 0.01))} />
             <Row label="Max drawdown" value={fmtPct(pct(limits?.max_drawdown_pct, 0.15))} />
             <Row label="Max positions" value={String(limits?.max_concurrent_positions ?? 1)} />
+            <Row label="Max entries/day" value={String(limits?.max_daily_entries ?? 2)} />
             <Row label="Trading capital" value={tradingCapital > 0 ? fmtUsd(tradingCapital, 0) : "—"} />
             <Row label="~$ risk / trade" value={fmtUsd(maxRiskUsd)} />
             <Row label="~$ max position" value={fmtUsd(maxPosUsd)} />
@@ -126,14 +137,17 @@ function LimitCard({
   current,
   limit,
   subLeft,
+  gainMode = false,
 }: {
   title: string;
   current: number;
   limit: number;
   subLeft?: string;
+  gainMode?: boolean;
 }) {
   const pctOfLimit = limit ? Math.min(100, (current / limit) * 100) : 0;
-  const danger = pctOfLimit >= 80;
+  const danger = !gainMode && pctOfLimit >= 80;
+  const success = gainMode && pctOfLimit >= 100;
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -142,11 +156,21 @@ function LimitCard({
       <CardContent className="space-y-2">
         <Progress
           value={pctOfLimit}
-          className={danger ? "[&>div]:bg-destructive" : "[&>div]:bg-accent"}
+          className={
+            success
+              ? "[&>div]:bg-accent"
+              : danger
+                ? "[&>div]:bg-destructive"
+                : "[&>div]:bg-accent"
+          }
         />
         <div className="flex justify-between text-xs font-data">
           <span className="text-muted-foreground">{subLeft}</span>
-          <span className={danger ? "text-destructive" : "text-foreground"}>
+          <span
+            className={
+              success ? "text-accent" : danger ? "text-destructive" : "text-foreground"
+            }
+          >
             {current.toFixed(2)}% / {limit.toFixed(2)}%
           </span>
         </div>

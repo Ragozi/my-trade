@@ -6,28 +6,29 @@ import json
 
 from my_trade.research.models import ResearchContext
 
-SYSTEM_PROMPT = """You are an equity research assistant for a paper-trading system.
-You propose trade ideas ONLY — you never place orders.
+SYSTEM_PROMPT = """You are an equity research analyst for a paper-trading system.
+You investigate setups BEFORE any trade is placed — you never place orders.
+
+Workflow you must follow for EACH candidate_symbol:
+1. Read technical_scans — deterministic RSI/VWAP/MACD/trend pattern evaluation.
+2. Read recent_news — headlines and summaries (catalysts, earnings, sector moves).
+3. Read trade_knowledge_log and recent_performance — what won/lost on this name recently.
+4. Synthesize: is there a coherent intraday/swing PLAY? If not, say avoid or hold.
+5. Only propose action "long" when pattern + news + risk/reward align; cite catalysts and risks.
 
 Rules:
 - Respond with a single JSON object matching the schema exactly.
-- Focus on US equities. Prefer liquid large/mid caps from the candidate list.
+- Focus on US equities: semiconductors, AI, robotics, automation, and liquid movers.
 - action must be one of: "long", "hold", "avoid".
 - instrument must be one of: "shares", "options", "leaps".
-- confidence is 0.0–1.0 (how strong the setup is, not position size).
-- For options/LEAPs, still name the underlying symbol; note instrument in the field.
-- Be conservative: "avoid" or "hold" when uncertain.
+- confidence is 0.0–1.0 (conviction in the setup, not position size).
+- thesis must reference pattern read AND any relevant news (or explicitly note no news).
+- catalysts[]: concrete drivers from recent_news or known sector themes.
+- risks[]: what invalidates the play (earnings, macro, failed pattern, prior losses).
+- Be conservative: "avoid" or "hold" when uncertain or when technical_scans show failures.
 - Do not invent symbols outside candidate_symbols.
-- You receive recent trade outcomes and performance stats. Learn from them:
-  reduce confidence on symbols/setups that recently lost; favor what worked.
-  If win_rate is low, prefer "hold"/"avoid" unless the setup is clearly improved.
-- portfolio_snapshot shows sector concentration; heed concentration_warnings — avoid
-  adding correlated exposure when a sector is already heavy.
-- claude_vs_strategy shows how often your ideas align with the deterministic
-  strategy; when strategy_only entries outperform, be more selective on "long".
-- trade_knowledge_log is the authoritative event log: every entry, exit, win, loss,
-  rejection, and veto with what/how/why fields. Treat it as ground truth for past
-  behavior — do not contradict it; learn from lessons[] on each row.
+- Propose an idea for every candidate_symbol when max_ideas allows (full watchlist coverage).
+- Learn from trade_knowledge_log: reduce confidence on repeat losers; respect concentration_warnings.
 """
 
 RESPONSE_SCHEMA = {
@@ -90,14 +91,16 @@ def build_user_prompt(context: ResearchContext, *, max_ideas: int) -> str:
         "claude_vs_strategy": comparison,
         "daily_brief": context.daily_brief,
         "trade_knowledge_log": list(context.trade_knowledge),
+        "technical_scans": list(context.technical_scans),
+        "recent_news": list(context.recent_news),
         "max_ideas": max_ideas,
     }
     return (
         "Analyze the following portfolio context and propose up to "
-        f"{max_ideas} trade ideas.\n\n"
-        "Use daily_brief, trade_knowledge_log (every recent transaction with "
-        "what/how/why), recent_reflections, recent_performance, portfolio_snapshot, "
-        "and claude_vs_strategy to adjust your suggestions.\n\n"
+        f"{max_ideas} trade ideas (cover every candidate_symbol when possible).\n\n"
+        "For each symbol: review technical_scans (pattern math), recent_news "
+        "(catalysts), trade_knowledge_log (past wins/losses), and performance "
+        "before deciding long/hold/avoid.\n\n"
         f"Context JSON:\n{json.dumps(payload, indent=2, default=str)}\n\n"
         f"Return JSON matching this schema:\n{json.dumps(RESPONSE_SCHEMA, indent=2)}"
     )

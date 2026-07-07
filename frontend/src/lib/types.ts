@@ -80,8 +80,11 @@ export interface RiskConfig {
   max_risk_per_trade_pct: number;
   max_open_risk_pct: number;
   daily_loss_limit_pct: number;
+  daily_profit_target_pct?: number;
   max_drawdown_pct: number;
   max_concurrent_positions: number;
+  max_daily_entries?: number;
+  max_entries_per_symbol_per_day?: number;
   trading_capital?: number;
   max_notional_pct?: number;
 }

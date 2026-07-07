@@ -31,6 +31,7 @@ class ActionKind(StrEnum):
 class HaltReason(StrEnum):
     CIRCUIT_BREAKER = "circuit_breaker"
     DAILY_LOSS_LIMIT = "daily_loss_limit"
+    DAILY_PROFIT_TARGET = "daily_profit_target"
 
 
 @dataclass(frozen=True)

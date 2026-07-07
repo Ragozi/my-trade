@@ -16,6 +16,7 @@ from .engine import (
     evaluate_trade,
     is_circuit_breaker_tripped,
     is_daily_loss_limit_hit,
+    is_daily_profit_target_hit,
     position_size,
 )
 from .models import (
@@ -38,5 +39,6 @@ __all__ = [
     "evaluate_trade",
     "is_circuit_breaker_tripped",
     "is_daily_loss_limit_hit",
+    "is_daily_profit_target_hit",
     "position_size",
 ]

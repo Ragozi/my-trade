@@ -45,6 +45,9 @@ class DailyState:
     def entries_for(self, symbol: str) -> int:
         return self.entries_today.get(normalize_symbol(symbol), 0)
 
+    def total_entries_today(self) -> int:
+        return sum(self.entries_today.values())
+
 
 def virtual_broker_scale(trading_capital: float, broker_equity: float) -> float:
     """Ratio mapping broker dollars to virtual ``TRADING_CAPITAL`` dollars."""

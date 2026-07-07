@@ -406,6 +406,41 @@ class TestOrchestrator:
         assert result.halt_reason is HaltReason.DAILY_LOSS_LIMIT
         assert executor.entries == []
 
+    def test_daily_profit_target_halts_entries(self, tmp_path: Path) -> None:
+        store = DailyStateStore(tmp_path / "daily_state.json")
+        store.save(
+            DailyState(
+                trading_day=TODAY,
+                start_of_day_equity=15_000.0,
+                peak_equity=15_150.0,
+                broker_sod_equity=15_000.0,
+            )
+        )
+        executor = FakeExecutor()
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=FakeStrategy(entry=signal()),
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot(equity=15_150.0)),  # type: ignore[arg-type]
+            store=store,
+            limits=RiskLimits(
+                max_risk_per_trade_pct=0.02,
+                max_total_open_risk_pct=0.07,
+                daily_loss_limit_pct=0.01,
+                daily_profit_target_pct=0.01,
+                max_drawdown_pct=0.15,
+                max_concurrent_positions=1,
+                max_notional_pct=0.4,
+            ),
+            symbols=(SYMBOL,),
+            trading_capital=15_000.0,
+            clock=lambda: NOW,
+        )
+        result = orch.run_cycle(NOW)
+        assert result.halted is True
+        assert result.halt_reason is HaltReason.DAILY_PROFIT_TARGET
+        assert executor.entries == []
+
     def test_exit_path_closes_position(self, tmp_path: Path) -> None:
         store = DailyStateStore(tmp_path / "daily_state.json")
         store.save(
@@ -509,6 +544,23 @@ class TestOrchestrator:
         assert result.halted is False
         assert any(a.kind is ActionKind.ERROR for a in result.actions)
         assert executor.entries == []
+
+    def test_empty_watchlist_falls_back_to_static_symbols(self, tmp_path: Path) -> None:
+        executor = FakeExecutor()
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=FakeStrategy(entry=signal()),
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot()),  # type: ignore[arg-type]
+            store=DailyStateStore(tmp_path / "s.json"),
+            limits=limits(),
+            symbols=(SYMBOL, "MSFT"),
+            watchlist=lambda: (),
+            clock=lambda: NOW,
+        )
+        result = orch.run_cycle(NOW)
+        assert result.halted is False
+        assert len(executor.entries) == 1
 
     def test_session_closed_skips_entries(self, tmp_path: Path) -> None:
         executor = FakeExecutor()

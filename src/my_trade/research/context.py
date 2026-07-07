@@ -35,6 +35,8 @@ def build_research_context(
     comparison_summary: ComparisonSummary | None = None,
     daily_brief: dict[str, Any] | None = None,
     trade_knowledge: tuple[dict[str, Any], ...] = (),
+    technical_scans: tuple[dict[str, Any], ...] = (),
+    recent_news: tuple[dict[str, Any], ...] = (),
 ) -> ResearchContext:
     open_positions = tuple(
         OpenPositionSummary(
@@ -68,4 +70,6 @@ def build_research_context(
         comparison_summary=comparison_summary,
         daily_brief=daily_brief,
         trade_knowledge=trade_knowledge,
+        technical_scans=technical_scans,
+        recent_news=recent_news,
     )

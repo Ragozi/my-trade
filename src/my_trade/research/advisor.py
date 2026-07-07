@@ -18,6 +18,7 @@ class ResearchConfig:
     enabled: bool = False
     model: str = "claude-sonnet-4-20250514"
     min_confidence: float = 0.55
+    entry_veto_min_confidence: float = 0.10
     max_ideas_per_cycle: int = 5
     require_approval_for_entry: bool = False
     block_avoid_for_entry: bool = True
@@ -130,6 +131,7 @@ class ResearchAdvisor:
             block_hold=self._config.block_hold_for_entry,
             require_long_approval=self._config.require_approval_for_entry,
             sticky_idea=sticky_idea,
+            entry_veto_min_confidence=self._config.entry_veto_min_confidence,
         )
 
     def entry_veto_reason(
@@ -149,4 +151,5 @@ class ResearchAdvisor:
             block_hold=self._config.block_hold_for_entry,
             require_long_approval=self._config.require_approval_for_entry,
             sticky_idea=sticky_idea,
+            entry_veto_min_confidence=self._config.entry_veto_min_confidence,
         )

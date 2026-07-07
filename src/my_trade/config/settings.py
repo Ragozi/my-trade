@@ -24,6 +24,11 @@ from .parsing import env_bool, env_float, env_int, env_str, parse_symbols
 
 DEFAULT_CRYPTO_SYMBOL = "BTC/USD"
 DEFAULT_EQUITY_SYMBOLS = "AAPL,MSFT,TSLA,NVDA,AMD"
+# Thematic seed: semiconductors + AI/robotics — merged with Alpaca movers, not a trade cap.
+DEFAULT_SCREENER_SEED_SYMBOLS = (
+    "NVDA,AMD,AVGO,QCOM,MU,AMAT,LRCX,KLAC,MRVL,ARM,INTC,ON,"
+    "TSLA,PLTR,ISRG,SYM,TER,PATH,SERV,AI,RKLB,SOFI"
+)
 ASSET_CLASS_CRYPTO = "crypto"
 ASSET_CLASS_EQUITIES = "equities"
 VALID_ASSET_CLASSES = (ASSET_CLASS_CRYPTO, ASSET_CLASS_EQUITIES)
@@ -46,9 +51,11 @@ class RiskSettings:
     max_risk_per_trade_pct: float = 0.02      # R1
     max_total_open_risk_pct: float = 0.07     # R2
     daily_loss_limit_pct: float = 0.05        # R3
+    daily_profit_target_pct: float = 0.0       # optional R+ : halt entries when day goal hit (0=off)
     max_drawdown_pct: float = 0.15            # R4
     max_concurrent_positions: int = 1
     max_entries_per_symbol_per_day: int = 10
+    max_daily_entries: int = 2
     # When set, size and halt on this virtual balance (paper equity may be much larger).
     trading_capital: float = 0.0
     max_notional_pct: float = 0.25  # max single-position notional vs risk equity
@@ -59,6 +66,7 @@ class RiskSettings:
             max_risk_per_trade_pct=self.max_risk_per_trade_pct,
             max_total_open_risk_pct=self.max_total_open_risk_pct,
             daily_loss_limit_pct=self.daily_loss_limit_pct,
+            daily_profit_target_pct=self.daily_profit_target_pct,
             max_drawdown_pct=self.max_drawdown_pct,
             max_concurrent_positions=self.max_concurrent_positions,
             max_notional_pct=self.max_notional_pct,
@@ -69,17 +77,24 @@ class RiskSettings:
             "max_risk_per_trade_pct": self.max_risk_per_trade_pct,
             "max_total_open_risk_pct": self.max_total_open_risk_pct,
             "daily_loss_limit_pct": self.daily_loss_limit_pct,
+            "daily_profit_target_pct": self.daily_profit_target_pct,
             "max_drawdown_pct": self.max_drawdown_pct,
         }
         for name, value in pcts.items():
             if not 0.0 < value <= 1.0:
                 raise ValueError(f"{name} must be in (0, 1], got {value}")
+        if not 0.0 <= self.daily_profit_target_pct <= 1.0:
+            raise ValueError(
+                f"daily_profit_target_pct must be in [0, 1], got {self.daily_profit_target_pct}"
+            )
         if self.max_risk_per_trade_pct > self.max_total_open_risk_pct:
             raise ValueError("max_risk_per_trade_pct cannot exceed max_total_open_risk_pct")
         if self.max_concurrent_positions < 1:
             raise ValueError("max_concurrent_positions must be >= 1")
         if self.max_entries_per_symbol_per_day < 1:
             raise ValueError("max_entries_per_symbol_per_day must be >= 1")
+        if self.max_daily_entries < 1:
+            raise ValueError("max_daily_entries must be >= 1")
         if self.trading_capital < 0:
             raise ValueError("trading_capital must be >= 0 (0 = use full broker equity)")
         if 0 < self.trading_capital < 500:
@@ -102,8 +117,8 @@ class StrategySettings:
     volume_spike_mult: float = 1.2
     volume_sma_period: int = 20
     stop_loss_pct: float = 0.0065
-    take_profit_pct: float = 0.017
-    max_hold_minutes: int = 15
+    take_profit_pct: float = 0.013
+    max_hold_minutes: int = 90
     require_5m_uptrend: bool = False
     require_15m_uptrend: bool = True
     require_volume_spike: bool = False
@@ -145,6 +160,10 @@ class ScreenerSettings:
     weight_volatility: float = 1.0
     weight_liquidity: float = 1.0
     # Dynamic equities universe (Alpaca screener); ignored for crypto.
+    seed_symbols: tuple[str, ...] = ()
+    exclude_symbols: tuple[str, ...] = ()
+    exclude_leveraged_etfs: bool = True
+    merge_seed_with_movers: bool = True
     use_movers: bool = False
     movers_source: str = "actives"  # actives | gainers | losers | both
     movers_top: int = 20
@@ -233,6 +252,7 @@ class ResearchSettings:
     timeout_seconds: float = 60.0
     max_ideas_per_cycle: int = 5
     min_confidence: float = 0.55
+    entry_veto_min_confidence: float = 0.10
     min_interval_seconds: int = 300
     max_calls_per_day: int = 100
     require_approval_for_entry: bool = False
@@ -336,13 +356,15 @@ def _load_alpaca(env: Mapping[str, str]) -> AlpacaSettings:
 def _load_risk(env: Mapping[str, str]) -> RiskSettings:
     return RiskSettings(
         max_risk_per_trade_pct=env_float(env, "MAX_RISK_PER_TRADE_PCT", 0.02),
-        max_total_open_risk_pct=env_float(env, "MAX_TOTAL_OPEN_RISK_PCT", 0.07),
-        daily_loss_limit_pct=env_float(env, "DAILY_LOSS_LIMIT_PCT", 0.05),
+        max_total_open_risk_pct=env_float(env, "MAX_TOTAL_OPEN_RISK_PCT", 0.05),
+        daily_loss_limit_pct=env_float(env, "DAILY_LOSS_LIMIT_PCT", 0.01),
+        daily_profit_target_pct=env_float(env, "DAILY_PROFIT_TARGET_PCT", 0.01),
         max_drawdown_pct=env_float(env, "MAX_DRAWDOWN_PCT", 0.15),
         max_concurrent_positions=env_int(env, "MAX_OPEN_POSITIONS", 1),
         max_entries_per_symbol_per_day=env_int(env, "MAX_ENTRIES_PER_SYMBOL_PER_DAY", 1),
+        max_daily_entries=env_int(env, "MAX_DAILY_ENTRIES", 1),
         trading_capital=env_float(env, "TRADING_CAPITAL", 0.0),
-        max_notional_pct=env_float(env, "MAX_NOTIONAL_PCT", 0.25),
+        max_notional_pct=env_float(env, "MAX_NOTIONAL_PCT", 0.40),
     )
 
 
@@ -356,8 +378,8 @@ def _load_strategy(env: Mapping[str, str]) -> StrategySettings:
         volume_spike_mult=env_float(env, "VOLUME_SPIKE_MULT", 1.2),
         volume_sma_period=env_int(env, "VOLUME_SMA_PERIOD", 20),
         stop_loss_pct=env_float(env, "STOP_LOSS_PCT", 0.0065),
-        take_profit_pct=env_float(env, "TAKE_PROFIT_PCT", 0.017),
-        max_hold_minutes=env_int(env, "MAX_HOLD_MINUTES", 15),
+        take_profit_pct=env_float(env, "TAKE_PROFIT_PCT", 0.013),
+        max_hold_minutes=env_int(env, "MAX_HOLD_MINUTES", 90),
         require_5m_uptrend=env_bool(env, "REQUIRE_5M_UPTREND", False),
         require_15m_uptrend=env_bool(env, "REQUIRE_15M_UPTREND", True),
         require_volume_spike=env_bool(env, "REQUIRE_VOLUME_SPIKE", False),
@@ -377,27 +399,35 @@ def _load_strategy(env: Mapping[str, str]) -> StrategySettings:
 def _load_screener(env: Mapping[str, str]) -> ScreenerSettings:
     raw_universe = env_str(env, "SCREENER_UNIVERSE", "")
     universe = tuple(parse_symbols(raw_universe)) if raw_universe else DEFAULT_CRYPTO_UNIVERSE
+    raw_seed = env_str(env, "SCREENER_SEED_SYMBOLS", DEFAULT_SCREENER_SEED_SYMBOLS)
+    seed_symbols = tuple(parse_symbols(raw_seed))
+    raw_exclude = env_str(env, "SCREENER_EXCLUDE_SYMBOLS", "")
+    exclude_symbols = tuple(parse_symbols(raw_exclude)) if raw_exclude else ()
     return ScreenerSettings(
         enabled=env_bool(env, "USE_SCREENER", False),
         universe=universe,
+        seed_symbols=seed_symbols,
+        exclude_symbols=exclude_symbols,
+        exclude_leveraged_etfs=env_bool(env, "SCREENER_EXCLUDE_LEVERAGED_ETFS", True),
+        merge_seed_with_movers=env_bool(env, "SCREENER_MERGE_SEED_WITH_MOVERS", True),
         timeframe=env_str(env, "SCREENER_TIMEFRAME", "15Min"),
         bar_limit=env_int(env, "SCREENER_BAR_LIMIT", 50),
         atr_period=env_int(env, "SCREENER_ATR_PERIOD", 14),
         lookback=env_int(env, "SCREENER_LOOKBACK", 20),
         refresh_seconds=env_int(env, "SCREENER_REFRESH_SECONDS", 900),
-        min_price=env_float(env, "SCREENER_MIN_PRICE", 0.0),
+        min_price=env_float(env, "SCREENER_MIN_PRICE", 5.0),
         max_price=env_float(env, "SCREENER_MAX_PRICE", float("inf")),
-        min_dollar_volume=env_float(env, "SCREENER_MIN_DOLLAR_VOLUME", 0.0),
-        min_atr_pct=env_float(env, "SCREENER_MIN_ATR_PCT", 0.0),
+        min_dollar_volume=env_float(env, "SCREENER_MIN_DOLLAR_VOLUME", 250_000.0),
+        min_atr_pct=env_float(env, "SCREENER_MIN_ATR_PCT", 0.004),
         max_atr_pct=env_float(env, "SCREENER_MAX_ATR_PCT", 1.0),
-        min_bars=env_int(env, "SCREENER_MIN_BARS", 20),
+        min_bars=env_int(env, "SCREENER_MIN_BARS", 10),
         top_n=env_int(env, "SCREENER_TOP_N", 5),
-        weight_volatility=env_float(env, "SCREENER_WEIGHT_VOLATILITY", 1.0),
+        weight_volatility=env_float(env, "SCREENER_WEIGHT_VOLATILITY", 1.2),
         weight_liquidity=env_float(env, "SCREENER_WEIGHT_LIQUIDITY", 1.0),
         use_movers=env_bool(env, "SCREENER_USE_MOVERS", False),
         movers_source=env_str(env, "SCREENER_MOVERS_SOURCE", "actives"),
-        movers_top=env_int(env, "SCREENER_MOVERS_TOP", 20),
-        movers_min_volume=env_float(env, "SCREENER_MOVERS_MIN_VOLUME", 0.0),
+        movers_top=env_int(env, "SCREENER_MOVERS_TOP", 25),
+        movers_min_volume=env_float(env, "SCREENER_MOVERS_MIN_VOLUME", 100_000.0),
     )
 
 
@@ -465,9 +495,10 @@ def _load_research(env: Mapping[str, str]) -> ResearchSettings:
         timeout_seconds=env_float(env, "CLAUDE_TIMEOUT_SECONDS", 60.0),
         max_ideas_per_cycle=env_int(env, "CLAUDE_MAX_IDEAS", 5),
         min_confidence=env_float(env, "CLAUDE_MIN_CONFIDENCE", 0.55),
+        entry_veto_min_confidence=env_float(env, "RESEARCH_ENTRY_VETO_MIN_CONFIDENCE", 0.10),
         min_interval_seconds=env_int(env, "CLAUDE_CALL_INTERVAL_SECONDS", 300),
         max_calls_per_day=env_int(env, "CLAUDE_MAX_CALLS_PER_DAY", 100),
-        require_approval_for_entry=env_bool(env, "CLAUDE_REQUIRE_APPROVAL", False),
+        require_approval_for_entry=env_bool(env, "CLAUDE_REQUIRE_APPROVAL", True),
         block_avoid_for_entry=env_bool(env, "RESEARCH_BLOCK_AVOID", True),
         block_hold_for_entry=env_bool(env, "RESEARCH_BLOCK_HOLD", True),
         equities_only=env_bool(env, "CLAUDE_EQUITIES_ONLY", True),

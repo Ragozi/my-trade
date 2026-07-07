@@ -57,6 +57,41 @@ def test_research_hold_allowed_when_block_disabled() -> None:
     )
 
 
+def test_low_confidence_avoid_blocked_with_entry_veto_threshold() -> None:
+    proposal = ClaudeProposal(
+        ideas=(
+            TradeIdea(
+                symbol="AAPL",
+                action=TradeAction.AVOID,
+                confidence=0.20,
+                thesis="Earnings volatility",
+            ),
+        ),
+    )
+    reason = research_veto_reason(
+        proposal,
+        "AAPL",
+        min_confidence=0.55,
+        block_avoid=True,
+        block_hold=True,
+        require_long_approval=False,
+        entry_veto_min_confidence=0.10,
+    )
+    assert reason is not None
+    assert "avoid" in reason
+
+    reason_old = research_veto_reason(
+        proposal,
+        "AAPL",
+        min_confidence=0.55,
+        block_avoid=True,
+        block_hold=True,
+        require_long_approval=False,
+        entry_veto_min_confidence=0.55,
+    )
+    assert reason_old is None
+
+
 def test_sticky_hold_blocks_when_research_skipped() -> None:
     skipped = ClaudeProposal(skipped=True, skip_reason="daily budget exhausted (10 calls)")
     sticky = TradeIdea(

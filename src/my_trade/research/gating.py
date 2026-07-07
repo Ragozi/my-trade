@@ -35,9 +35,11 @@ def research_veto_reason(
     block_hold: bool,
     require_long_approval: bool,
     sticky_idea: TradeIdea | None = None,
+    entry_veto_min_confidence: float | None = None,
 ) -> str | None:
     """Return a human-readable veto reason, or None if entry may proceed."""
     idea = _effective_idea(proposal, symbol, sticky_idea=sticky_idea)
+    veto_conf = entry_veto_min_confidence if entry_veto_min_confidence is not None else min_confidence
 
     if idea is None:
         if require_long_approval:
@@ -46,11 +48,11 @@ def research_veto_reason(
             return "research did not propose this symbol"
         return None
 
-    if block_avoid and idea.action is TradeAction.AVOID and idea.confidence >= min_confidence:
+    if block_avoid and idea.action is TradeAction.AVOID and idea.confidence >= veto_conf:
         label = "sticky " if proposal is None or proposal.skipped else ""
         return f"{label}research avoid conf={idea.confidence:.2f}"
 
-    if block_hold and idea.action is TradeAction.HOLD and idea.confidence >= min_confidence:
+    if block_hold and idea.action is TradeAction.HOLD and idea.confidence >= veto_conf:
         label = "sticky " if proposal is None or proposal.skipped else ""
         return f"{label}research hold conf={idea.confidence:.2f}"
 
@@ -70,6 +72,7 @@ def allows_entry_with_gates(
     block_hold: bool,
     require_long_approval: bool,
     sticky_idea: TradeIdea | None = None,
+    entry_veto_min_confidence: float | None = None,
 ) -> bool:
     return research_veto_reason(
         proposal,
@@ -79,4 +82,5 @@ def allows_entry_with_gates(
         block_hold=block_hold,
         require_long_approval=require_long_approval,
         sticky_idea=sticky_idea,
+        entry_veto_min_confidence=entry_veto_min_confidence,
     ) is None
