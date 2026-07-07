@@ -34,7 +34,6 @@ from my_trade.research.client import MockClaudeResearchClient  # noqa: E402
 from my_trade.research.context import build_research_context  # noqa: E402
 from my_trade.research.factory import (  # noqa: E402
     build_research_advisor,
-    build_research_client,
     build_research_evaluation,
     build_research_memory,
 )
