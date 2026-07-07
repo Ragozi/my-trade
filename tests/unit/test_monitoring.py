@@ -96,6 +96,7 @@ class FakeStrategy:
         self._exit_reason = exit_reason
         self.entry_calls = 0
         self.exit_calls = 0
+        self.exit_entry_times: list[datetime] = []
 
     def detect_entry(
         self,
@@ -119,6 +120,7 @@ class FakeStrategy:
         now: datetime,
     ) -> str | None:
         self.exit_calls += 1
+        self.exit_entry_times.append(entry_time)
         return self._exit_reason
 
 
@@ -217,6 +219,21 @@ class TestDailyState:
         assert rolled.start_of_day_equity == 12_000.0
         assert rolled.peak_equity == 13_000.0  # lifetime high-water mark carried
         assert rolled.entries_today == {}
+
+    def test_rollover_preserves_metadata_for_positions_still_open(self) -> None:
+        other_key = normalize_symbol("ETH/USD")
+        prev = DailyState(
+            trading_day=date(2026, 6, 17),
+            start_of_day_equity=11_000.0,
+            peak_equity=13_000.0,
+            entries_today={KEY: 3, other_key: 2},
+            position_stops={KEY: 99_000.0, other_key: 2_900.0},
+            entry_times={KEY: NOW.isoformat(), other_key: NOW.isoformat()},
+        )
+        rolled = rollover_if_new_day(prev, TODAY, 12_000.0, open_symbols=(SYMBOL,))
+        assert rolled.entries_today == {}
+        assert rolled.position_stops == {KEY: 99_000.0}
+        assert rolled.entry_times == {KEY: NOW.isoformat()}
 
     def test_rollover_noop_same_day(self) -> None:
         state = DailyState(trading_day=TODAY, start_of_day_equity=12_000.0, peak_equity=12_000.0)
@@ -408,6 +425,44 @@ class TestOrchestrator:
         assert result.exits_submitted == 1
         assert executor.closes == [SYMBOL]
         assert KEY not in orch.state.position_stops
+
+    def test_new_day_keeps_open_position_entry_time_for_exits(
+        self, tmp_path: Path
+    ) -> None:
+        previous_day = date(2026, 6, 17)
+        entry_time = datetime(2026, 6, 17, 20, 30, tzinfo=UTC)
+        store = DailyStateStore(tmp_path / "daily_state.json")
+        store.save(
+            record_entry(
+                DailyState(
+                    trading_day=previous_day,
+                    start_of_day_equity=12_000.0,
+                    peak_equity=12_000.0,
+                ),
+                SYMBOL,
+                99_350.0,
+                entry_time,
+            )
+        )
+        strategy = FakeStrategy(exit_reason=None)
+        pos = (Position(SYMBOL, qty=0.5, avg_entry_price=100_000.0),)
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=strategy,
+            execution=FakeExecutor(),  # type: ignore[arg-type]
+            account=FakeAccount(snapshot(positions=pos)),  # type: ignore[arg-type]
+            store=store,
+            limits=limits(),
+            symbols=(SYMBOL,),
+            clock=lambda: NOW,
+        )
+
+        orch.run_cycle(NOW)
+
+        assert strategy.exit_entry_times == [entry_time]
+        assert orch.state.position_stops[KEY] == 99_350.0
+        assert entry_time_for(orch.state, SYMBOL) == entry_time
+        assert orch.state.entries_today == {}
 
     def test_max_entries_skips(self, tmp_path: Path) -> None:
         store = DailyStateStore(tmp_path / "daily_state.json")

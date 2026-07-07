@@ -13,6 +13,7 @@ losses) — a deliberately safe bias.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 
@@ -73,24 +74,30 @@ def rollover_if_new_day(
     broker_equity: float,
     *,
     trading_capital: float | None = None,
+    open_symbols: Iterable[str] | None = None,
 ) -> DailyState:
     """Reset daily counters when the trading day changes.
 
     Start-of-day equity is recaptured; the all-time peak is carried forward (the
     drawdown circuit breaker is measured from the lifetime high-water mark).
+    Stop/entry-time metadata is position-scoped, so it is retained for symbols
+    the broker still reports as open across the date boundary.
     """
     if state.trading_day == today:
         return state
     risk_sod = trading_capital if trading_capital and trading_capital > 0 else broker_equity
     prior_peak = state.peak_equity if state.peak_equity > 0 else risk_sod
+    open_keys = {normalize_symbol(symbol) for symbol in open_symbols or ()}
     return DailyState(
         trading_day=today,
         start_of_day_equity=risk_sod,
         peak_equity=max(prior_peak, risk_sod),
         broker_sod_equity=broker_equity,
         entries_today={},
-        position_stops={},
-        entry_times={},
+        position_stops={
+            key: stop for key, stop in state.position_stops.items() if key in open_keys
+        },
+        entry_times={key: when for key, when in state.entry_times.items() if key in open_keys},
         halt_lesson_logged=False,
     )
 

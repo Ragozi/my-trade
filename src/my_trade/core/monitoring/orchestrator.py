@@ -202,6 +202,7 @@ class TradingOrchestrator:
             when.date(),
             snapshot.equity,
             trading_capital=self._trading_capital,
+            open_symbols=(pos.symbol for pos in snapshot.positions),
         )
         if self._trading_capital and state.broker_sod_equity <= 0:
             state = replace(
