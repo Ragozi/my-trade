@@ -34,7 +34,6 @@ from my_trade.research.client import MockClaudeResearchClient  # noqa: E402
 from my_trade.research.context import build_research_context  # noqa: E402
 from my_trade.research.factory import (  # noqa: E402
     build_research_advisor,
-    build_research_client,
     build_research_evaluation,
     build_research_memory,
 )
@@ -95,7 +94,12 @@ def run_once(*, mock: bool, verbose: bool) -> int:
     store = DailyStateStore(settings.runtime.daily_state_file)
     state = store.load() or DailyState.empty()
     now = datetime.now(UTC)
-    state = rollover_if_new_day(state, now.date(), snapshot.equity)
+    state = rollover_if_new_day(
+        state,
+        now.date(),
+        snapshot.equity,
+        open_symbols=(pos.symbol for pos in snapshot.positions),
+    )
     state = update_peak(state, snapshot.equity)
     account_state = build_account_state(
         snapshot, state, settings.strategy.stop_loss_pct
