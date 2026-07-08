@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from my_trade.config import (
@@ -18,6 +20,18 @@ from my_trade.config.parsing import (
     parse_symbols,
 )
 from my_trade.core.risk import RiskLimits
+
+
+def _read_env_example() -> dict[str, str]:
+    env: dict[str, str] = {}
+    path = Path(__file__).resolve().parents[2] / ".env.example"
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env[key] = value
+    return env
 
 
 class TestParsing:
@@ -140,6 +154,11 @@ class TestLoadSettings:
         env = {"APCA_API_KEY_ID": "key", "APCA_API_SECRET_KEY": "secret"}
         s = load_settings(env=env)
         s.validate_for_trading()  # should not raise
+
+    def test_env_example_allows_paper_without_llm_keys(self) -> None:
+        s = load_settings(env=_read_env_example())
+        assert s.research.enabled is False
+        s.validate_for_trading()  # should not require optional research keys
 
 
 class TestAssetClass:

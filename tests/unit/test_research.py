@@ -267,6 +267,41 @@ def test_validate_requires_openai_key_when_workhorse_openai() -> None:
         s.validate_for_trading()
 
 
+def test_validate_skips_unkeyed_providers_when_research_disabled() -> None:
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "false",
+            "ENABLE_CLAUDE": "false",
+            "RESEARCH_WORKHORSE_PROVIDER": "openai",
+            "OPENAI_API_KEY": "",
+            "RESEARCH_PREMIUM_PROVIDER": "xai",
+            "XAI_API_KEY": "",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    assert s.research.enabled is False
+    s.validate_for_trading()
+
+
+def test_validate_ignores_workhorse_key_in_claude_only_mode() -> None:
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "true",
+            "ENABLE_CLAUDE": "true",
+            "ANTHROPIC_API_KEY": "sk-ant-test",
+            "RESEARCH_TIER_MODE": "claude_only",
+            "RESEARCH_WORKHORSE_PROVIDER": "openai",
+            "OPENAI_API_KEY": "",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    s.validate_for_trading()
+
+
 def test_premium_fallback_when_claude_off() -> None:
     from my_trade.research.factory import build_research_advisor
 
