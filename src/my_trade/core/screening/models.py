@@ -49,10 +49,12 @@ class ScreenerCriteria:
     min_dollar_volume: float = 0.0
     min_atr_pct: float = 0.0
     max_atr_pct: float = float("inf")
+    min_change_pct: float = 0.0
     min_bars: int = 20
     top_n: int = 5
     weight_volatility: float = 1.0
     weight_liquidity: float = 1.0
+    weight_momentum: float = 0.0
 
     def validate(self) -> None:
         if self.min_price < 0:
@@ -71,3 +73,7 @@ class ScreenerCriteria:
             raise ValueError("top_n must be >= 1")
         if self.weight_volatility < 0 or self.weight_liquidity < 0:
             raise ValueError("weights must be >= 0")
+        if self.weight_momentum < 0:
+            raise ValueError("weight_momentum must be >= 0")
+        if self.min_change_pct < 0:
+            raise ValueError("min_change_pct must be >= 0")

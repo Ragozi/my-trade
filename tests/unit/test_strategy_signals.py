@@ -53,6 +53,14 @@ class TestVwap:
         # 5% away
         assert check_vwap(105.0, 100.0, P).passed is False
 
+    def test_momentum_above_vwap_passes(self) -> None:
+        p = params(momentum_above_vwap=True)
+        assert check_vwap(102.0, 100.0, p).passed is True
+
+    def test_momentum_below_vwap_fails(self) -> None:
+        p = params(momentum_above_vwap=True)
+        assert check_vwap(99.0, 100.0, p).passed is False
+
 
 class TestRsi:
     def test_unavailable_fails(self) -> None:

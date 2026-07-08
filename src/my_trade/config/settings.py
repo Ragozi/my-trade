@@ -127,6 +127,7 @@ class StrategySettings:
     require_macd_positive: bool = True
     require_macd_expanding: bool = True
     bollinger_lower_half_only: bool = True
+    momentum_above_vwap: bool = False
     bollinger_period: int = 20
     bollinger_std: float = 2.0
     macd_fast: int = 12
@@ -155,19 +156,25 @@ class ScreenerSettings:
     min_dollar_volume: float = 0.0
     min_atr_pct: float = 0.0
     max_atr_pct: float = 1.0
+    min_change_pct: float = 0.0
     min_bars: int = 20
     top_n: int = 5
     weight_volatility: float = 1.0
     weight_liquidity: float = 1.0
+    weight_momentum: float = 0.0
     # Dynamic equities universe (Alpaca screener); ignored for crypto.
     seed_symbols: tuple[str, ...] = ()
     exclude_symbols: tuple[str, ...] = ()
     exclude_leveraged_etfs: bool = True
+    exclude_large_caps: bool = False
+    movers_only: bool = False
+    fallback_to_static_symbols: bool = True
     merge_seed_with_movers: bool = True
     use_movers: bool = False
     movers_source: str = "actives"  # actives | gainers | losers | both
     movers_top: int = 20
     movers_min_volume: float = 0.0
+    am_refresh_seconds: int = 0
 
     def to_criteria(self) -> ScreenerCriteria:
         """Project into the screener's ``ScreenerCriteria`` contract."""
@@ -177,10 +184,12 @@ class ScreenerSettings:
             min_dollar_volume=self.min_dollar_volume,
             min_atr_pct=self.min_atr_pct,
             max_atr_pct=self.max_atr_pct,
+            min_change_pct=self.min_change_pct,
             min_bars=self.min_bars,
             top_n=self.top_n,
             weight_volatility=self.weight_volatility,
             weight_liquidity=self.weight_liquidity,
+            weight_momentum=self.weight_momentum,
         )
 
 
@@ -388,6 +397,7 @@ def _load_strategy(env: Mapping[str, str]) -> StrategySettings:
         require_macd_positive=env_bool(env, "REQUIRE_MACD_POSITIVE", True),
         require_macd_expanding=env_bool(env, "REQUIRE_MACD_EXPANDING", True),
         bollinger_lower_half_only=env_bool(env, "BOLLINGER_LOWER_HALF_ONLY", True),
+        momentum_above_vwap=env_bool(env, "MOMENTUM_ABOVE_VWAP", False),
         bollinger_period=env_int(env, "BOLLINGER_PERIOD", 20),
         bollinger_std=env_float(env, "BOLLINGER_STD", 2.0),
         macd_fast=env_int(env, "MACD_FAST", 12),
@@ -409,21 +419,27 @@ def _load_screener(env: Mapping[str, str]) -> ScreenerSettings:
         seed_symbols=seed_symbols,
         exclude_symbols=exclude_symbols,
         exclude_leveraged_etfs=env_bool(env, "SCREENER_EXCLUDE_LEVERAGED_ETFS", True),
+        exclude_large_caps=env_bool(env, "SCREENER_EXCLUDE_LARGE_CAPS", False),
+        movers_only=env_bool(env, "SCREENER_MOVERS_ONLY", False),
+        fallback_to_static_symbols=env_bool(env, "SCREENER_FALLBACK_TO_STATIC", True),
         merge_seed_with_movers=env_bool(env, "SCREENER_MERGE_SEED_WITH_MOVERS", True),
         timeframe=env_str(env, "SCREENER_TIMEFRAME", "15Min"),
         bar_limit=env_int(env, "SCREENER_BAR_LIMIT", 50),
         atr_period=env_int(env, "SCREENER_ATR_PERIOD", 14),
         lookback=env_int(env, "SCREENER_LOOKBACK", 20),
         refresh_seconds=env_int(env, "SCREENER_REFRESH_SECONDS", 900),
+        am_refresh_seconds=env_int(env, "SCREENER_AM_REFRESH_SECONDS", 0),
         min_price=env_float(env, "SCREENER_MIN_PRICE", 5.0),
         max_price=env_float(env, "SCREENER_MAX_PRICE", float("inf")),
         min_dollar_volume=env_float(env, "SCREENER_MIN_DOLLAR_VOLUME", 250_000.0),
         min_atr_pct=env_float(env, "SCREENER_MIN_ATR_PCT", 0.004),
         max_atr_pct=env_float(env, "SCREENER_MAX_ATR_PCT", 1.0),
+        min_change_pct=env_float(env, "SCREENER_MIN_CHANGE_PCT", 0.0),
         min_bars=env_int(env, "SCREENER_MIN_BARS", 10),
         top_n=env_int(env, "SCREENER_TOP_N", 5),
         weight_volatility=env_float(env, "SCREENER_WEIGHT_VOLATILITY", 1.2),
         weight_liquidity=env_float(env, "SCREENER_WEIGHT_LIQUIDITY", 1.0),
+        weight_momentum=env_float(env, "SCREENER_WEIGHT_MOMENTUM", 0.0),
         use_movers=env_bool(env, "SCREENER_USE_MOVERS", False),
         movers_source=env_str(env, "SCREENER_MOVERS_SOURCE", "actives"),
         movers_top=env_int(env, "SCREENER_MOVERS_TOP", 25),

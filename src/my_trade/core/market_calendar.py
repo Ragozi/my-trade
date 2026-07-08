@@ -25,6 +25,18 @@ ASSET_CLASS_CRYPTO = "crypto"
 ASSET_CLASS_EQUITIES = "equities"
 
 
+def is_am_momentum_window(now: datetime) -> bool:
+    """True during the first ~2 hours of the US cash session (9:30–11:30 ET).
+
+    Used to refresh the screener faster and bias toward opening-range movers.
+    """
+    aware = now if now.tzinfo is not None else now.replace(tzinfo=ZoneInfo("UTC"))
+    ny = aware.astimezone(_NY)
+    if ny.weekday() >= 5:
+        return False
+    return _OPEN <= ny.time() < time(11, 30)
+
+
 def is_equity_regular_session(now: datetime) -> bool:
     """True when ``now`` falls in the US equities regular cash session.
 

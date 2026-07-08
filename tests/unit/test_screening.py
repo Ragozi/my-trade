@@ -64,14 +64,20 @@ def make_frame(
 
 
 def candidate(
-    symbol: str, *, atr: float, dv: float, price: float = 100.0, bars: int = 30
+    symbol: str,
+    *,
+    atr: float,
+    dv: float,
+    price: float = 100.0,
+    bars: int = 30,
+    chg: float = 0.0,
 ) -> Candidate:
     return Candidate(
         symbol=symbol,
         last_price=price,
         dollar_volume=dv,
         atr_pct=atr,
-        change_pct=0.0,
+        change_pct=chg,
         bars=bars,
     )
 
@@ -139,6 +145,24 @@ class TestFilters:
     def test_rejects_insufficient_bars(self) -> None:
         crit = ScreenerCriteria(min_bars=40)
         assert passes(candidate("A", atr=0.02, dv=1000, bars=30), crit) is False
+
+    def test_rejects_low_momentum(self) -> None:
+        crit = ScreenerCriteria(min_change_pct=0.02)
+        assert passes(candidate("A", atr=0.02, dv=1000, chg=0.01), crit) is False
+
+    def test_rank_prefers_momentum_when_weighted(self) -> None:
+        crit = ScreenerCriteria(
+            top_n=2,
+            weight_volatility=0.0,
+            weight_liquidity=0.0,
+            weight_momentum=1.0,
+        )
+        cands = [
+            candidate("FLAT", atr=0.05, dv=1000, chg=0.0),
+            candidate("RIP", atr=0.02, dv=1000, chg=0.10),
+        ]
+        ranked = rank(cands, crit)
+        assert ranked[0].symbol == "RIP"
 
     def test_rank_orders_by_score_and_caps_top_n(self) -> None:
         crit = ScreenerCriteria(top_n=2, weight_volatility=1.0, weight_liquidity=1.0)

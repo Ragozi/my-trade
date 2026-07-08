@@ -174,13 +174,15 @@ def build_screener(settings: Settings, data: object) -> Screener | None:
         atr_period=sc.atr_period,
         lookback=sc.lookback,
         refresh_seconds=sc.refresh_seconds,
+        am_refresh_seconds=sc.am_refresh_seconds,
     )
     log.info(
-        "Screener ENABLED | %s universe=%s top_n=%d refresh=%ds tf=%s",
+        "Screener ENABLED | %s universe=%s top_n=%d refresh=%ds am_refresh=%ds tf=%s",
         settings.asset_class,
         source_desc,
         sc.top_n,
         sc.refresh_seconds,
+        sc.am_refresh_seconds,
         sc.timeframe,
     )
     return screener
@@ -271,6 +273,7 @@ def build_orchestrator(
         fallback_stop_pct=settings.strategy.stop_loss_pct,
         trading_capital=settings.risk.trading_capital or None,
         watchlist=screener.select if screener is not None else None,
+        watchlist_fallback_to_static=settings.screener.fallback_to_static_symbols,
         session_is_open=make_session_guard(settings.asset_class),
         research_advisor=research_advisor,  # type: ignore[arg-type]
         research_memory=research_memory,  # type: ignore[arg-type]

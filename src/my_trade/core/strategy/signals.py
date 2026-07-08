@@ -31,6 +31,14 @@ def check_trend(close: float, ema: float | None, label: str) -> ConditionResult:
 def check_vwap(close: float, vwap: float | None, params: StrategyParams) -> ConditionResult:
     if vwap is None or vwap <= 0:
         return ConditionResult(False, "VWAP unavailable")
+    if params.momentum_above_vwap:
+        if close >= vwap:
+            dist_pct = (close - vwap) / vwap
+            return ConditionResult(
+                True,
+                f"Above VWAP momentum ({dist_pct * 100:.2f}% above)",
+            )
+        return ConditionResult(False, f"Below VWAP {close:.2f} < {vwap:.2f}")
     dist_pct = abs(close - vwap) / vwap
     if dist_pct <= params.vwap_pullback_pct:
         return ConditionResult(True, f"VWAP OK ({dist_pct * 100:.2f}% away)")

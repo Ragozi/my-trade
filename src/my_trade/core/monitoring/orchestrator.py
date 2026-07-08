@@ -115,6 +115,7 @@ class TradingOrchestrator:
         asset_class: str = "crypto",
         trading_capital: float | None = None,
         watchlist: Callable[[], Sequence[str]] | None = None,
+        watchlist_fallback_to_static: bool = True,
         session_is_open: Callable[[datetime], bool] | None = None,
         research_advisor: ResearchAdvisor | None = None,
         research_memory: ResearchMemoryStore | None = None,
@@ -135,6 +136,7 @@ class TradingOrchestrator:
         self._limits = limits
         self._symbols = tuple(symbols)
         self._watchlist = watchlist
+        self._watchlist_fallback_to_static = watchlist_fallback_to_static
         self._session_is_open = session_is_open
         self._research = research_advisor
         self._memory = research_memory
@@ -201,6 +203,9 @@ class TradingOrchestrator:
             self._log.warning("watchlist failed, using static symbols: %s", exc)
             return self._symbols
         if not selected:
+            if not self._watchlist_fallback_to_static:
+                self._log.debug("watchlist empty; no static fallback configured")
+                return ()
             self._log.debug("watchlist empty; falling back to static symbols")
             return self._symbols
         return selected

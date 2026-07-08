@@ -26,3 +26,9 @@ def test_merged_universe_dedupes_and_excludes() -> None:
 def test_leveraged_etf_in_exclude_set() -> None:
     assert is_blocked_symbol("SOXS", exclude=merged_exclude_set())
     assert not is_blocked_symbol("NVDA", exclude=merged_exclude_set())
+
+
+def test_large_cap_exclude_when_enabled() -> None:
+    exclude = merged_exclude_set(exclude_large_caps=True)
+    assert is_blocked_symbol("NVDA", exclude=exclude)
+    assert not is_blocked_symbol("ABCD", exclude=exclude)

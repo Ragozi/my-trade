@@ -21,6 +21,8 @@ from datetime import UTC, datetime
 
 from my_trade.data import MarketDataProvider
 
+from my_trade.core.market_calendar import is_am_momentum_window
+
 from .filters import rank
 from .metrics import build_candidate
 from .models import Candidate, ScreenerCriteria
@@ -45,6 +47,7 @@ class Screener:
         atr_period: int = 14,
         lookback: int = 20,
         refresh_seconds: int = 900,
+        am_refresh_seconds: int = 0,
         clock: Callable[[], datetime] = _utcnow,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -57,6 +60,7 @@ class Screener:
         self._atr_period = atr_period
         self._lookback = lookback
         self._refresh_seconds = refresh_seconds
+        self._am_refresh_seconds = max(0, am_refresh_seconds)
         self._clock = clock
         self._log = logger or logging.getLogger("my_trade.screening")
         self._last_run: datetime | None = None
@@ -93,10 +97,15 @@ class Screener:
         )
         return ranked
 
+    def _effective_refresh_seconds(self, now: datetime) -> int:
+        if self._am_refresh_seconds > 0 and is_am_momentum_window(now):
+            return self._am_refresh_seconds
+        return self._refresh_seconds
+
     def _is_stale(self, now: datetime) -> bool:
         if self._last_run is None:
             return True
-        return (now - self._last_run).total_seconds() >= self._refresh_seconds
+        return (now - self._last_run).total_seconds() >= self._effective_refresh_seconds(now)
 
     def select(self) -> Sequence[str]:
         """Return the cached watchlist, re-screening only when it's stale.

@@ -18,12 +18,12 @@ def build_equities_universe(settings: Settings) -> tuple[UniverseSource, str]:
     exclude = merged_exclude_set(
         extra=frozenset(s.upper() for s in sc.exclude_symbols),
         exclude_leveraged_etfs=sc.exclude_leveraged_etfs,
+        exclude_large_caps=sc.exclude_large_caps,
     )
-    seed = sc.seed_symbols if sc.seed_symbols else settings.symbols
-    seed_src = StaticUniverseSource(seed)
 
-    if not sc.use_movers:
-        return seed_src, f"seed({len(seed)})"
+    if not sc.use_movers and not sc.movers_only:
+        seed = sc.seed_symbols if sc.seed_symbols else settings.symbols
+        return StaticUniverseSource(seed), f"seed({len(seed)})"
 
     movers = AlpacaMoversUniverse(
         settings.alpaca.api_key,
@@ -33,9 +33,16 @@ def build_equities_universe(settings: Settings) -> tuple[UniverseSource, str]:
         min_volume=sc.movers_min_volume,
         exclude=tuple(exclude),
     )
-    if sc.merge_seed_with_movers:
-        return (
-            MergedUniverseSource(seed_src, movers, exclude=exclude),
-            f"seed({len(seed)})+movers({sc.movers_source},top={sc.movers_top})",
-        )
-    return movers, f"movers({sc.movers_source},top={sc.movers_top})"
+
+    if sc.movers_only or not sc.merge_seed_with_movers:
+        label = f"movers({sc.movers_source},top={sc.movers_top})"
+        if sc.movers_only:
+            label = f"movers-only({sc.movers_source},top={sc.movers_top})"
+        return movers, label
+
+    seed = sc.seed_symbols if sc.seed_symbols else settings.symbols
+    seed_src = StaticUniverseSource(seed)
+    return (
+        MergedUniverseSource(seed_src, movers, exclude=exclude),
+        f"seed({len(seed)})+movers({sc.movers_source},top={sc.movers_top})",
+    )

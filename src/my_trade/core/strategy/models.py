@@ -91,6 +91,7 @@ class StrategyParams:
     require_macd_positive: bool = True
     require_macd_expanding: bool = True
     bollinger_lower_half_only: bool = True
+    momentum_above_vwap: bool = False
     bollinger_period: int = 20
     bollinger_std: float = 2.0
     macd_fast: int = 12
@@ -120,6 +121,7 @@ class StrategyParams:
             require_macd_positive=s.require_macd_positive,
             require_macd_expanding=s.require_macd_expanding,
             bollinger_lower_half_only=s.bollinger_lower_half_only,
+            momentum_above_vwap=s.momentum_above_vwap,
             bollinger_period=s.bollinger_period,
             bollinger_std=s.bollinger_std,
             macd_fast=s.macd_fast,
