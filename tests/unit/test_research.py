@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 import pytest
 
 from my_trade.config import load_settings
+from my_trade.core.models import OrderSide
 from my_trade.core.monitoring.models import ActionKind
 from my_trade.core.monitoring.orchestrator import TradingOrchestrator
 from my_trade.core.monitoring.store import DailyStateStore
 from my_trade.core.risk import RiskLimits
 from my_trade.core.strategy.models import ScanEvaluation, Signal
-from my_trade.core.models import OrderSide
 from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
 from my_trade.research.client import MockClaudeResearchClient, extract_json_object
 from my_trade.research.context import build_research_context
@@ -215,7 +215,10 @@ def test_require_approval_blocks_unlisted_symbol(monkeypatch: pytest.MonkeyPatch
         research_advisor=advisor,
     )
     result = orch.run_cycle(datetime(2026, 6, 20, 15, 0, tzinfo=UTC))
-    assert any(a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT" for a in result.actions)
+    assert any(
+        a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT"
+        for a in result.actions
+    )
     assert not any(a.kind is ActionKind.ENTRY_SUBMITTED for a in result.actions)
 
 
