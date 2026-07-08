@@ -297,21 +297,24 @@ class Settings:
                 "Live trading requires PAPER_TRADING=false AND ALLOW_LIVE_TRADING=true"
             )
         rc = self.research
-        if rc.claude_enabled and not rc.api_key:
+        if not rc.enabled:
+            return
+        if rc.claude_enabled and rc.tier_mode != "workhorse_only" and not rc.api_key:
             raise ValueError(
                 "ENABLE_CLAUDE=true requires ANTHROPIC_API_KEY in .env"
             )
         wh = rc.workhorse
-        if wh.provider == "openai" and not wh.openai_api_key:
+        checks_workhorse = rc.tier_mode != "claude_only"
+        if checks_workhorse and wh.provider == "openai" and not wh.openai_api_key:
             raise ValueError(
                 "RESEARCH_WORKHORSE_PROVIDER=openai requires OPENAI_API_KEY in .env"
             )
-        if wh.provider == "xai" and not wh.xai_api_key:
+        if checks_workhorse and wh.provider == "xai" and not wh.xai_api_key:
             raise ValueError(
                 "RESEARCH_WORKHORSE_PROVIDER=xai requires XAI_API_KEY in .env"
             )
         prem = rc.premium
-        if rc.premium_active:
+        if rc.tier_mode != "workhorse_only" and rc.premium_active:
             if prem.provider == "openai" and not wh.openai_api_key:
                 raise ValueError(
                     "RESEARCH_PREMIUM_PROVIDER=openai requires OPENAI_API_KEY in .env"

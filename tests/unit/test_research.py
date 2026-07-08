@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 import pytest
 
 from my_trade.config import load_settings
+from my_trade.core.models import OrderSide
 from my_trade.core.monitoring.models import ActionKind
 from my_trade.core.monitoring.orchestrator import TradingOrchestrator
 from my_trade.core.monitoring.store import DailyStateStore
 from my_trade.core.risk import RiskLimits
 from my_trade.core.strategy.models import ScanEvaluation, Signal
-from my_trade.core.models import OrderSide
 from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
 from my_trade.research.client import MockClaudeResearchClient, extract_json_object
 from my_trade.research.context import build_research_context
@@ -215,7 +215,10 @@ def test_require_approval_blocks_unlisted_symbol(monkeypatch: pytest.MonkeyPatch
         research_advisor=advisor,
     )
     result = orch.run_cycle(datetime(2026, 6, 20, 15, 0, tzinfo=UTC))
-    assert any(a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT" for a in result.actions)
+    assert any(
+        a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT"
+        for a in result.actions
+    )
     assert not any(a.kind is ActionKind.ENTRY_SUBMITTED for a in result.actions)
 
 
@@ -265,6 +268,41 @@ def test_validate_requires_openai_key_when_workhorse_openai() -> None:
     )
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         s.validate_for_trading()
+
+
+def test_validate_skips_unkeyed_providers_when_research_disabled() -> None:
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "false",
+            "ENABLE_CLAUDE": "false",
+            "RESEARCH_WORKHORSE_PROVIDER": "openai",
+            "OPENAI_API_KEY": "",
+            "RESEARCH_PREMIUM_PROVIDER": "xai",
+            "XAI_API_KEY": "",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    assert s.research.enabled is False
+    s.validate_for_trading()
+
+
+def test_validate_ignores_workhorse_key_in_claude_only_mode() -> None:
+    s = load_settings(
+        {
+            "ENABLE_RESEARCH": "true",
+            "ENABLE_CLAUDE": "true",
+            "ANTHROPIC_API_KEY": "sk-ant-test",
+            "RESEARCH_TIER_MODE": "claude_only",
+            "RESEARCH_WORKHORSE_PROVIDER": "openai",
+            "OPENAI_API_KEY": "",
+            "ASSET_CLASS": "equities",
+            "APCA_API_KEY_ID": "k",
+            "APCA_API_SECRET_KEY": "s",
+        }
+    )
+    s.validate_for_trading()
 
 
 def test_premium_fallback_when_claude_off() -> None:
