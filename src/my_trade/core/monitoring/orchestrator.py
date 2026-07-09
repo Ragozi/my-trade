@@ -309,8 +309,13 @@ class TradingOrchestrator:
 
         # (4) Session gate — never open NEW entries while the market is closed
         # (exits above still run; bracket legs remain live at the broker).
+        # Premarket: still refresh the screener watchlist so the open is warm.
         if self._session_is_open is not None and not self._session_is_open(when):
-            self._log.info("market closed; skipping new entries this cycle")
+            watchlist = self._active_symbols()
+            self._log.info(
+                "market closed; skipping new entries this cycle (watchlist=%s)",
+                ",".join(watchlist) if watchlist else "(empty)",
+            )
             actions.append(CycleAction(ActionKind.SESSION_CLOSED))
             return CycleResult(
                 timestamp=when,
@@ -500,12 +505,16 @@ class TradingOrchestrator:
                     self._research.config.equities_only,
                 )
             return [], None
-        session_open = True
-        if self._session_is_open is not None:
-            session_open = self._session_is_open(when)
-        if self._research.config.market_hours_only and not session_open:
-            self._log.debug("research skipped (market closed, market_hours_only=true)")
-            return [], None
+        if self._research.config.market_hours_only:
+            from my_trade.core.market_calendar import is_equity_research_window
+
+            # Premarket (8:30 ET+) is allowed so the watchlist/research warm up
+            # before cash open; overnight/weekend still skipped.
+            if not is_equity_research_window(when):
+                self._log.debug(
+                    "research skipped (outside research window, market_hours_only=true)"
+                )
+                return [], None
         candidates = self._active_symbols()
         if not candidates:
             return [], None

@@ -18,6 +18,7 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 _NY = ZoneInfo("America/New_York")
+_PREOPEN = time(8, 30)  # one hour before cash open — screener/research warmup
 _OPEN = time(9, 30)
 _CLOSE = time(16, 0)
 
@@ -25,16 +26,24 @@ ASSET_CLASS_CRYPTO = "crypto"
 ASSET_CLASS_EQUITIES = "equities"
 
 
-def is_am_momentum_window(now: datetime) -> bool:
-    """True during the first ~2 hours of the US cash session (9:30–11:30 ET).
-
-    Used to refresh the screener faster and bias toward opening-range movers.
-    """
+def _ny_weekday_time(now: datetime) -> tuple[int, time] | None:
+    """Return (weekday, NY time) or None when weekend."""
     aware = now if now.tzinfo is not None else now.replace(tzinfo=ZoneInfo("UTC"))
     ny = aware.astimezone(_NY)
-    if ny.weekday() >= 5:
+    if ny.weekday() >= 5:  # 5=Sat, 6=Sun
+        return None
+    return ny.weekday(), ny.time()
+
+
+def is_am_momentum_window(now: datetime) -> bool:
+    """True from premarket warmup through the opening range (8:30–11:30 ET).
+
+    Used to refresh the screener faster ahead of and into the cash open.
+    """
+    parts = _ny_weekday_time(now)
+    if parts is None:
         return False
-    return _OPEN <= ny.time() < time(11, 30)
+    return _PREOPEN <= parts[1] < time(11, 30)
 
 
 def is_equity_regular_session(now: datetime) -> bool:
@@ -43,11 +52,22 @@ def is_equity_regular_session(now: datetime) -> bool:
     Accepts tz-aware or naive datetimes; naive is assumed to be UTC. Weekends
     are closed. Holidays/early-closes are not yet modeled (treated as open).
     """
-    aware = now if now.tzinfo is not None else now.replace(tzinfo=ZoneInfo("UTC"))
-    ny = aware.astimezone(_NY)
-    if ny.weekday() >= 5:  # 5=Sat, 6=Sun
+    parts = _ny_weekday_time(now)
+    if parts is None:
         return False
-    return _OPEN <= ny.time() < _CLOSE
+    return _OPEN <= parts[1] < _CLOSE
+
+
+def is_equity_research_window(now: datetime) -> bool:
+    """True during premarket warmup + cash session (8:30–16:00 ET weekdays).
+
+    Entries stay gated to the regular session; research/screener may run here so
+    the watchlist is warm before the open.
+    """
+    parts = _ny_weekday_time(now)
+    if parts is None:
+        return False
+    return _PREOPEN <= parts[1] < _CLOSE
 
 
 def make_session_guard(asset_class: str) -> Callable[[datetime], bool]:

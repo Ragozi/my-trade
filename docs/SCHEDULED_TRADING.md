@@ -4,12 +4,14 @@ Automated weekday start/stop for the paper bot stack.
 
 | Task | Time (local) | Action |
 |------|----------------|--------|
-| **My-Trade Start** | Mon–Fri **7:55 AM** | API + UI + paper bot |
+| **My-Trade Start** | Mon–Fri **7:30 AM** | API + UI + paper bot |
 | **My-Trade Stop** | Mon–Fri **3:00 PM** | Kill ports 8000/8080 + bot windows |
 
-Times assume your PC uses **US Central** local time (CDT/CST).  
-7:55 AM is ~35 minutes before cash open (8:30 AM CT).  
-3:00 PM matches cash close (3:00 PM CT / 4:00 PM ET).
+Times assume your PC uses **US Central** local time (CDT/CST).
+
+- **7:30 AM CT** = **8:30 AM ET** — about **1 hour before** cash open (8:30 AM CT / 9:30 AM ET).
+- During that premarket hour the bot warms the screener watchlist and may run research; **new entries stay gated until cash open**.
+- **3:00 PM CT** matches cash close (4:00 PM ET).
 
 ## One-time setup
 
@@ -18,11 +20,13 @@ cd D:\Projects\My-Trade
 powershell -ExecutionPolicy Bypass -File scripts\register_scheduled_tasks.ps1
 ```
 
+Re-run the script after changing start/stop times so Task Scheduler picks up the new triggers.
+
 ## Requirements
 
 - Windows user **logged in** at start time (tasks run interactively so cmd windows can open).
 - `.venv`, Node.js, and `.env` configured as for manual launch.
-- PC awake at 7:55 AM (disable sleep during market hours or use wake timers).
+- PC awake at **7:30 AM** (disable sleep during market hours or use wake timers).
 
 ## Logs
 

@@ -9,8 +9,9 @@ $StopBat = Join-Path $Root "scripts\scheduled_stop.bat"
 $StartAction = New-ScheduledTaskAction -Execute $StartBat -WorkingDirectory $Root
 $StopAction = New-ScheduledTaskAction -Execute $StopBat -WorkingDirectory $Root
 
-# 7:55 AM — ~35 min before US cash open in Central (9:30 ET = 8:30 CT)
-$StartTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At "7:55 AM"
+# 7:30 AM CT — ~1 hour before US cash open (9:30 ET = 8:30 CT)
+# Premarket warmup: screener + research run; entries stay gated until 8:30 CT.
+$StartTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At "7:30 AM"
 
 # 3:00 PM — US cash close in Central (4:00 PM ET = 3:00 PM CT)
 $StopTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At "3:00 PM"
@@ -19,7 +20,7 @@ $Settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -StartWhenAvailable `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 8)
+    -ExecutionTimeLimit (New-TimeSpan -Hours 9)
 
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
@@ -28,7 +29,7 @@ Register-ScheduledTask -TaskName "My-Trade Start" `
     -Trigger $StartTrigger `
     -Settings $Settings `
     -Principal $Principal `
-    -Description "Start My-Trade API, UI, and paper bot at 7:55 AM weekdays (Central local time)." `
+    -Description "Start My-Trade API, UI, and paper bot at 7:30 AM weekdays (Central) for premarket warmup." `
     -Force | Out-Null
 
 Register-ScheduledTask -TaskName "My-Trade Stop" `
@@ -40,7 +41,7 @@ Register-ScheduledTask -TaskName "My-Trade Stop" `
     -Force | Out-Null
 
 Write-Host "Registered scheduled tasks:"
-Write-Host "  My-Trade Start  - Mon-Fri 7:55 AM local time"
+Write-Host "  My-Trade Start  - Mon-Fri 7:30 AM local time (1h before cash open)"
 Write-Host "  My-Trade Stop   - Mon-Fri 3:00 PM local time"
 Write-Host ""
 Write-Host "Logs: $Root\logs\scheduler.log"

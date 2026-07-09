@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from my_trade.core.market_calendar import (
     is_am_momentum_window,
     is_equity_regular_session,
+    is_equity_research_window,
     make_session_guard,
 )
 
@@ -41,6 +42,10 @@ class TestEquityRegularSession:
 
 
 class TestAmMomentumWindow:
+    def test_premarket_warmup(self) -> None:
+        # 12:30 UTC = 08:30 ET — one hour before cash open
+        assert is_am_momentum_window(_utc(2026, 6, 17, 12, 30)) is True
+
     def test_inside_opening_range(self) -> None:
         # 14:00 UTC = 10:00 ET on a Wednesday
         assert is_am_momentum_window(_utc(2026, 6, 17, 14, 0)) is True
@@ -48,6 +53,18 @@ class TestAmMomentumWindow:
     def test_after_opening_range(self) -> None:
         # 16:00 UTC = 12:00 ET
         assert is_am_momentum_window(_utc(2026, 6, 17, 16, 0)) is False
+
+
+class TestResearchWindow:
+    def test_premarket_allowed(self) -> None:
+        assert is_equity_research_window(_utc(2026, 6, 17, 12, 30)) is True  # 08:30 ET
+        assert is_equity_regular_session(_utc(2026, 6, 17, 12, 30)) is False
+
+    def test_cash_session_allowed(self) -> None:
+        assert is_equity_research_window(_utc(2026, 6, 17, 17, 0)) is True  # 13:00 ET
+
+    def test_overnight_blocked(self) -> None:
+        assert is_equity_research_window(_utc(2026, 6, 17, 11, 0)) is False  # 07:00 ET
 
 
 class TestSessionGuard:
