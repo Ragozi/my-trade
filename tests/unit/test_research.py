@@ -295,6 +295,60 @@ def test_premium_fallback_when_claude_off() -> None:
     assert advisor.allows_entry("AAPL", ClaudeProposal()) is True
 
 
+def test_composite_falls_through_on_tier_skip() -> None:
+    """Model 404 / rate-limit on Claude must not stop the workhorse tier."""
+    from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
+    from my_trade.research.composite import CompositeResearchAdvisor
+    from my_trade.research.models import ClaudeProposal, InstrumentType, TradeAction, TradeIdea
+    from my_trade.research.rate_limit import ResearchRateLimiter
+
+    class _FailClient:
+        def propose_equity_ideas(self, context, *, max_ideas: int):  # type: ignore[no-untyped-def]
+            raise RuntimeError("Error code: 404 - model not_found")
+
+    class _OkClient:
+        def propose_equity_ideas(self, context, *, max_ideas: int):  # type: ignore[no-untyped-def]
+            return ClaudeProposal(
+                ideas=(
+                    TradeIdea(
+                        symbol="ABCD",
+                        action=TradeAction.LONG,
+                        confidence=0.7,
+                        instrument=InstrumentType.SHARES,
+                        thesis="AM rip",
+                    ),
+                ),
+                provider="openai",
+            )
+
+    cfg = ResearchConfig(enabled=True, require_approval_for_entry=False)
+    composite = CompositeResearchAdvisor(
+        config=cfg,
+        tiers=(
+            (
+                "claude",
+                ResearchAdvisor(
+                    _FailClient(),  # type: ignore[arg-type]
+                    cfg,
+                    rate_limiter=ResearchRateLimiter(min_interval_seconds=0, max_calls_per_day=10),
+                ),
+            ),
+            (
+                "openai",
+                ResearchAdvisor(
+                    _OkClient(),  # type: ignore[arg-type]
+                    cfg,
+                    rate_limiter=ResearchRateLimiter(min_interval_seconds=0, max_calls_per_day=10),
+                ),
+            ),
+        ),
+        tier_mode="both",
+    )
+    result = composite.propose(object(), when=datetime.now(UTC))
+    assert result.called_api is True
+    assert result.proposal.ideas[0].symbol == "ABCD"
+
+
 def test_build_research_brief_from_empty_journal(tmp_path) -> None:
     from my_trade.research.brief import build_research_brief, save_brief
 

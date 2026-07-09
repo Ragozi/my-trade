@@ -114,6 +114,28 @@ def test_sticky_hold_blocks_when_research_skipped() -> None:
     assert "sticky" in reason
 
 
+def test_weak_sticky_avoid_is_ignored() -> None:
+    """avoid@0.00 must not lock the day when research is skipped."""
+    skipped = ClaudeProposal(skipped=True, skip_reason="rate limited")
+    sticky = TradeIdea(
+        symbol="NVDA",
+        action=TradeAction.AVOID,
+        confidence=0.0,
+        thesis="noise",
+    )
+    reason = research_veto_reason(
+        skipped,
+        "NVDA",
+        min_confidence=0.55,
+        block_avoid=True,
+        block_hold=True,
+        require_long_approval=False,
+        sticky_idea=sticky,
+        entry_veto_min_confidence=0.10,
+    )
+    assert reason is None
+
+
 def test_sticky_not_used_when_fresh_proposal_overrides() -> None:
     skipped = ClaudeProposal(skipped=True, skip_reason="daily budget exhausted")
     sticky = TradeIdea(

@@ -18,11 +18,19 @@ def _effective_idea(
     symbol: str,
     *,
     sticky_idea: TradeIdea | None,
+    entry_veto_min_confidence: float,
 ) -> TradeIdea | None:
     if proposal is not None and not proposal.skipped:
         idea = idea_for_symbol(proposal, symbol)
         if idea is not None:
             return idea
+    # Ignore zero/weak sticky avoid|hold — those are noise and must not lock the day.
+    if sticky_idea is not None and sticky_idea.action in (
+        TradeAction.AVOID,
+        TradeAction.HOLD,
+    ):
+        if sticky_idea.confidence < entry_veto_min_confidence:
+            return None
     return sticky_idea
 
 
@@ -38,8 +46,15 @@ def research_veto_reason(
     entry_veto_min_confidence: float | None = None,
 ) -> str | None:
     """Return a human-readable veto reason, or None if entry may proceed."""
-    idea = _effective_idea(proposal, symbol, sticky_idea=sticky_idea)
-    veto_conf = entry_veto_min_confidence if entry_veto_min_confidence is not None else min_confidence
+    veto_conf = (
+        entry_veto_min_confidence if entry_veto_min_confidence is not None else min_confidence
+    )
+    idea = _effective_idea(
+        proposal,
+        symbol,
+        sticky_idea=sticky_idea,
+        entry_veto_min_confidence=veto_conf,
+    )
 
     if idea is None:
         if require_long_approval:

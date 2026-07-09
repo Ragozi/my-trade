@@ -226,3 +226,25 @@ def test_performance_summary_win_rate() -> None:
     assert perf.losses == 1
     assert perf.win_rate == 0.5
     assert perf.avg_pnl_estimate == 2.5
+
+
+def test_note_proposals_skips_zero_confidence_avoid(tmp_path: Path) -> None:
+    store = ResearchMemoryStore(tmp_path / "mem.json")
+    store.note_proposals(
+        (
+            TradeIdea(symbol="NVDA", action=TradeAction.AVOID, confidence=0.0, thesis="noise"),
+            TradeIdea(symbol="ABCD", action=TradeAction.LONG, confidence=0.7, thesis="rip"),
+        )
+    )
+    assert store.stance_for_symbol("NVDA") is None
+    assert store.stance_for_symbol("ABCD") is not None
+    assert store.stance_for_symbol("ABCD").action is TradeAction.LONG
+
+
+def test_clear_stance(tmp_path: Path) -> None:
+    store = ResearchMemoryStore(tmp_path / "mem.json")
+    store.note_proposals(
+        (TradeIdea(symbol="ABCD", action=TradeAction.LONG, confidence=0.8, thesis="ok"),)
+    )
+    store.clear_stance()
+    assert store.stance_for_symbol("ABCD") is None

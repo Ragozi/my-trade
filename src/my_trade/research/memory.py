@@ -92,12 +92,26 @@ class ResearchMemoryStore:
         return reflection
 
     def note_proposals(self, ideas: Sequence[TradeIdea]) -> None:
-        """Cache latest research thesis and stance per symbol from proposals."""
+        """Cache latest research thesis and stance per symbol from proposals.
+
+        Skip zero-confidence avoid/hold — those are noise (or failed-model
+        fallbacks) and must not sticky-block entries for the rest of the day.
+        """
         for idea in ideas:
             sym = idea.symbol.upper()
+            if idea.action.value in ("avoid", "hold") and idea.confidence <= 0.0:
+                continue
             self._stance_by_symbol[sym] = idea
             if idea.thesis:
                 self._thesis_by_symbol[sym] = idea.thesis
+        self._save()
+
+    def clear_stance(self, symbol: str | None = None) -> None:
+        """Drop sticky stance for one symbol, or all symbols when ``symbol`` is None."""
+        if symbol is None:
+            self._stance_by_symbol.clear()
+        else:
+            self._stance_by_symbol.pop(symbol.upper(), None)
         self._save()
 
     @property

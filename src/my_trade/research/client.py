@@ -76,7 +76,7 @@ class ClaudeResearchClient:
         self,
         *,
         api_key: str,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-6",
         max_tokens: int = 4096,
         timeout_seconds: float = 60.0,
         message_fn: Callable[..., Any] | None = None,

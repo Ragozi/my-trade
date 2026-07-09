@@ -164,6 +164,33 @@ class TestAssetClass:
         s = load_settings(env={"ASSET_CLASS": "equities", "EQUITY_SYMBOLS": " , "})
         assert "AAPL" in s.symbols
 
+    def test_movers_only_allows_empty_equity_symbols(self) -> None:
+        s = load_settings(
+            env={
+                "ASSET_CLASS": "equities",
+                "EQUITY_SYMBOLS": "",
+                "USE_SCREENER": "true",
+                "SCREENER_USE_MOVERS": "true",
+                "SCREENER_MOVERS_ONLY": "true",
+                "SCREENER_FALLBACK_TO_STATIC": "false",
+            }
+        )
+        assert s.symbols == ()
+        assert s.screener.movers_only is True
+        s.validate()  # must not require static symbols
+
+    def test_retired_claude_model_rejected_for_trading(self) -> None:
+        env = {
+            "APCA_API_KEY_ID": "key",
+            "APCA_API_SECRET_KEY": "secret",
+            "ENABLE_CLAUDE": "true",
+            "ANTHROPIC_API_KEY": "sk-test",
+            "CLAUDE_MODEL": "claude-sonnet-4-20250514",
+        }
+        s = load_settings(env=env)
+        with pytest.raises(ValueError, match="retired"):
+            s.validate_for_trading()
+
     def test_invalid_asset_class_fails_fast(self) -> None:
         with pytest.raises(ValueError):
             load_settings(env={"ASSET_CLASS": "forex"})

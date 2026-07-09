@@ -16,7 +16,7 @@ _log = logging.getLogger("my_trade.research.advisor")
 @dataclass(frozen=True)
 class ResearchConfig:
     enabled: bool = False
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     min_confidence: float = 0.55
     entry_veto_min_confidence: float = 0.10
     max_ideas_per_cycle: int = 5

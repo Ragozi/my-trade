@@ -72,8 +72,14 @@ class CompositeResearchAdvisor:
                     rate_limited=result.rate_limited,
                 )
             last = result
+            # Rate-limit / billing / model-404 skips: try the next tier.
+            # Only stop early when a tier returned a real (non-skipped) proposal
+            # without marking called_api (should be rare).
             if not result.proposal.skipped:
                 return result
+            reason = (result.proposal.skip_reason or "").lower()
+            if reason:
+                _log.info("research tier %s skipped (%s); trying next", name, reason[:120])
 
         if last is not None:
             return last

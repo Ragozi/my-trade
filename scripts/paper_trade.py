@@ -222,12 +222,52 @@ def log_research_status(settings: Settings, research: object | None) -> None:
         )
         return
     log.info(
-        "Research ACTIVE | mode=%s | tiers=%s | brief=%s | require_approval=%s",
+        "Research ACTIVE | mode=%s | tiers=%s | brief=%s | require_approval=%s min_conf=%.2f",
         rc.tier_mode,
         tier_label,
         rc.brief_file,
         rc.require_approval_for_entry,
+        rc.min_confidence,
     )
+
+
+def log_day_trade_banner(settings: Settings) -> None:
+    """Make the effective universe/strategy mode obvious at startup."""
+    sc = settings.screener
+    st = settings.strategy
+    if sc.enabled and sc.movers_only:
+        log.info(
+            "DAY-TRADE MODE | movers-only %s $%.0f–$%.0f | top_n=%d | "
+            "min_change=%.1f%% | am_refresh=%ds | momentum_vwap=%s | "
+            "vol_spike=%s | TP=%.1f%% SL=%.2f%% | max_daily_entries=%d | "
+            "static_fallback=%s | symbols=%s",
+            sc.movers_source,
+            sc.min_price,
+            sc.max_price if sc.max_price != float("inf") else 0,
+            sc.top_n,
+            sc.min_change_pct * 100,
+            sc.am_refresh_seconds,
+            st.momentum_above_vwap,
+            st.require_volume_spike,
+            st.take_profit_pct * 100,
+            st.stop_loss_pct * 100,
+            settings.risk.max_daily_entries,
+            sc.fallback_to_static_symbols,
+            ",".join(settings.symbols) if settings.symbols else "(none)",
+        )
+    elif sc.enabled:
+        log.info(
+            "SCREENER MODE | merge_seed=%s movers=%s top_n=%d | symbols=%s",
+            sc.merge_seed_with_movers,
+            sc.use_movers,
+            sc.top_n,
+            ",".join(settings.symbols) if settings.symbols else "(none)",
+        )
+    else:
+        log.info(
+            "STATIC SYMBOLS MODE | %s",
+            ",".join(settings.symbols) if settings.symbols else "(none)",
+        )
 
 
 def build_research_stack(settings: Settings) -> tuple[object | None, object | None, object | None]:
@@ -483,6 +523,7 @@ def run_once(settings: Settings) -> int:
     screener = build_screener(settings, data)
     research, memory, evaluation = build_research_stack(settings)
     knowledge = build_trade_knowledge(settings)
+    log_day_trade_banner(settings)
     log_research_status(settings, research)
     orchestrator = build_orchestrator(
         settings,
@@ -592,6 +633,11 @@ def run_loop(settings: Settings) -> int:
     screener = build_screener(settings, providers.data)
     research, memory, evaluation = build_research_stack(settings)
     knowledge = build_trade_knowledge(settings)
+    if memory is not None:
+        # Drop yesterday's weak sticky avoids so a fresh session can trade.
+        memory.clear_stance()
+        log.info("Cleared sticky research stance cache for new session")
+    log_day_trade_banner(settings)
     log_research_status(settings, research)
     orchestrator = build_orchestrator(
         settings,
@@ -610,7 +656,7 @@ def run_loop(settings: Settings) -> int:
     log.info(
         "Starting PAPER trading | asset_class=%s symbols=%s interval=%ds | LIVE DISABLED",
         settings.asset_class,
-        ",".join(settings.symbols),
+        ",".join(settings.symbols) if settings.symbols else "(movers-only)",
         interval,
     )
     pid_path(settings.runtime.log_dir).write_text(str(os.getpid()), encoding="utf-8")

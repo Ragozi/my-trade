@@ -24,6 +24,8 @@ from .parsing import env_bool, env_float, env_int, env_str, parse_symbols
 
 DEFAULT_CRYPTO_SYMBOL = "BTC/USD"
 DEFAULT_EQUITY_SYMBOLS = "AAPL,MSFT,TSLA,NVDA,AMD"
+# Active Anthropic Sonnet (claude-sonnet-4-20250514 retired Jun 2026 → 404).
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 # Thematic seed: semiconductors + AI/robotics — merged with Alpaca movers, not a trade cap.
 DEFAULT_SCREENER_SEED_SYMBOLS = (
     "NVDA,AMD,AVGO,QCOM,MU,AMAT,LRCX,KLAC,MRVL,ARM,INTC,ON,"
@@ -253,7 +255,7 @@ class ResearchSettings:
     claude_enabled: bool = False
     tier_mode: str = "both"  # workhorse_only | claude_only | both
     api_key: str = ""
-    model: str = "claude-sonnet-4-20250514"
+    model: str = DEFAULT_CLAUDE_MODEL
     workhorse: WorkhorseSettings = field(default_factory=WorkhorseSettings)
     premium: PremiumSettings = field(default_factory=PremiumSettings)
     brief_file: str = "logs/research_brief.json"
@@ -315,8 +317,11 @@ class Settings:
             raise ValueError(
                 f"ASSET_CLASS must be one of {VALID_ASSET_CLASSES}, got {self.asset_class!r}"
             )
-        if not self.symbols:
+        movers_only = self.is_equities and self.screener.enabled and self.screener.movers_only
+        if not self.symbols and not movers_only:
             raise ValueError("at least one symbol is required")
+        if movers_only and not self.screener.use_movers:
+            raise ValueError("SCREENER_MOVERS_ONLY=true requires SCREENER_USE_MOVERS=true")
 
     def validate_for_trading(self) -> None:
         """Stricter checks required before any order can be placed."""
@@ -331,6 +336,11 @@ class Settings:
         if rc.claude_enabled and not rc.api_key:
             raise ValueError(
                 "ENABLE_CLAUDE=true requires ANTHROPIC_API_KEY in .env"
+            )
+        if rc.claude_enabled and "20250514" in rc.model:
+            raise ValueError(
+                f"CLAUDE_MODEL={rc.model!r} is retired (404). "
+                f"Set CLAUDE_MODEL={DEFAULT_CLAUDE_MODEL} (or newer) in .env"
             )
         wh = rc.workhorse
         if wh.provider == "openai" and not wh.openai_api_key:
@@ -503,7 +513,7 @@ def _load_research(env: Mapping[str, str]) -> ResearchSettings:
         claude_enabled=claude_enabled,
         tier_mode=env_str(env, "RESEARCH_TIER_MODE", "both").strip().lower(),
         api_key=env_str(env, "ANTHROPIC_API_KEY", ""),
-        model=env_str(env, "CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+        model=env_str(env, "CLAUDE_MODEL", DEFAULT_CLAUDE_MODEL),
         workhorse=workhorse,
         premium=premium,
         brief_file=env_str(env, "RESEARCH_BRIEF_FILE", "logs/research_brief.json"),
@@ -548,13 +558,22 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         env = os.environ
 
     asset_class = env_str(env, "ASSET_CLASS", ASSET_CLASS_CRYPTO).strip().lower()
+    screener = _load_screener(env)
+    movers_only = (
+        asset_class == ASSET_CLASS_EQUITIES and screener.enabled and screener.movers_only
+    )
     if asset_class == ASSET_CLASS_EQUITIES:
-        symbols = tuple(parse_symbols(env_str(env, "EQUITY_SYMBOLS", DEFAULT_EQUITY_SYMBOLS)))
+        # Empty EQUITY_SYMBOLS is intentional for movers-only day-trade mode.
+        raw_equity = env.get("EQUITY_SYMBOLS")
+        if raw_equity is None and not movers_only:
+            symbols = tuple(parse_symbols(DEFAULT_EQUITY_SYMBOLS))
+        else:
+            symbols = tuple(parse_symbols(env_str(env, "EQUITY_SYMBOLS", "")))
         fallback = tuple(parse_symbols(DEFAULT_EQUITY_SYMBOLS))
     else:
         symbols = tuple(parse_symbols(env_str(env, "CRYPTO_SYMBOLS", DEFAULT_CRYPTO_SYMBOL)))
         fallback = (DEFAULT_CRYPTO_SYMBOL,)
-    if not symbols:
+    if not symbols and not movers_only:
         symbols = fallback
 
     settings = Settings(
@@ -562,7 +581,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         risk=_load_risk(env),
         strategy=_load_strategy(env),
         runtime=_load_runtime(env),
-        screener=_load_screener(env),
+        screener=screener,
         research=_load_research(env),
         asset_class=asset_class,
         crypto_mode=env_bool(env, "CRYPTO_MODE", asset_class == ASSET_CLASS_CRYPTO),
