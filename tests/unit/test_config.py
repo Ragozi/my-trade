@@ -141,6 +141,31 @@ class TestLoadSettings:
         s = load_settings(env=env)
         s.validate_for_trading()  # should not raise
 
+    def test_invalid_workhorse_research_provider_fails_fast(self) -> None:
+        env = {
+            "ENABLE_RESEARCH": "true",
+            "RESEARCH_WORKHORSE_PROVIDER": "opena",
+        }
+        with pytest.raises(ValueError, match="RESEARCH_WORKHORSE_PROVIDER"):
+            load_settings(env=env)
+
+    def test_invalid_premium_research_provider_fails_fast(self) -> None:
+        env = {
+            "ENABLE_RESEARCH": "true",
+            "RESEARCH_PREMIUM_PROVIDER": "grok",
+        }
+        with pytest.raises(ValueError, match="RESEARCH_PREMIUM_PROVIDER"):
+            load_settings(env=env)
+
+    def test_disabled_research_ignores_optional_provider_values(self) -> None:
+        env = {
+            "ENABLE_RESEARCH": "false",
+            "RESEARCH_WORKHORSE_PROVIDER": "opena",
+            "RESEARCH_PREMIUM_PROVIDER": "grok",
+        }
+        s = load_settings(env=env)
+        assert s.research.enabled is False
+
 
 class TestAssetClass:
     def test_defaults_to_crypto(self) -> None:

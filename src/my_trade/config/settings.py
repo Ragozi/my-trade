@@ -27,6 +27,8 @@ DEFAULT_EQUITY_SYMBOLS = "AAPL,MSFT,TSLA,NVDA,AMD"
 ASSET_CLASS_CRYPTO = "crypto"
 ASSET_CLASS_EQUITIES = "equities"
 VALID_ASSET_CLASSES = (ASSET_CLASS_CRYPTO, ASSET_CLASS_EQUITIES)
+DISABLED_RESEARCH_PROVIDERS = ("", "none")
+VALID_RESEARCH_PROVIDERS = ("openai", "xai")
 
 
 @dataclass(frozen=True)
@@ -286,6 +288,18 @@ class Settings:
             )
         if not self.symbols:
             raise ValueError("at least one symbol is required")
+        rc = self.research
+        provider_values = DISABLED_RESEARCH_PROVIDERS + VALID_RESEARCH_PROVIDERS
+        if rc.enabled and rc.workhorse.provider not in provider_values:
+            raise ValueError(
+                "RESEARCH_WORKHORSE_PROVIDER must be one of "
+                f"{VALID_RESEARCH_PROVIDERS} or 'none', got {rc.workhorse.provider!r}"
+            )
+        if rc.enabled and rc.premium.provider not in provider_values:
+            raise ValueError(
+                "RESEARCH_PREMIUM_PROVIDER must be one of "
+                f"{VALID_RESEARCH_PROVIDERS} or 'none', got {rc.premium.provider!r}"
+            )
 
     def validate_for_trading(self) -> None:
         """Stricter checks required before any order can be placed."""
