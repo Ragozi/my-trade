@@ -73,6 +73,8 @@ class Screener:
 
     def screen(self) -> list[Candidate]:
         """Run a full screening pass now and return ranked candidates."""
+        now = self._clock()
+        as_of = now.date()
         candidates: list[Candidate] = []
         for symbol in self._universe.symbols():
             try:
@@ -80,20 +82,34 @@ class Screener:
             except Exception as exc:  # fail safe: skip a bad symbol, keep screening
                 self._log.warning("screener: bars failed for %s: %s", symbol, exc)
                 continue
+            daily = None
+            try:
+                daily = self._data.get_bars(symbol, "1Day", 10)
+            except Exception as exc:
+                self._log.debug("screener: daily bars failed for %s: %s", symbol, exc)
             candidate = build_candidate(
-                symbol, bars, atr_period=self._atr_period, lookback=self._lookback
+                symbol,
+                bars,
+                atr_period=self._atr_period,
+                lookback=self._lookback,
+                daily=daily,
+                as_of=as_of,
             )
             if candidate is not None:
                 candidates.append(candidate)
 
         ranked = rank(candidates, self._criteria)
         self._ranked = ranked
-        self._last_run = self._clock()
+        self._last_run = now
+        gap_bits = [
+            f"{c.symbol}(gap={c.gap_pct:+.1%})" for c in ranked if abs(c.gap_pct) >= 0.01
+        ]
         self._log.info(
-            "screener: %d/%d candidates passed -> %s",
+            "screener: %d/%d candidates passed -> %s%s",
             len(ranked),
             len(candidates),
             [c.symbol for c in ranked],
+            f" overnight={gap_bits}" if gap_bits else "",
         )
         return ranked
 

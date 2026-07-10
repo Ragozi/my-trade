@@ -83,6 +83,7 @@ class StrategyParams:
     volume_sma_period: int = 20
     stop_loss_pct: float = 0.0065
     take_profit_pct: float = 0.017
+    take_profit_dollars: float = 0.0
     max_hold_minutes: int = 15
     require_5m_uptrend: bool = False
     require_15m_uptrend: bool = True
@@ -92,6 +93,7 @@ class StrategyParams:
     require_macd_expanding: bool = True
     bollinger_lower_half_only: bool = True
     momentum_above_vwap: bool = False
+    gap_scalp_mode: bool = False
     bollinger_period: int = 20
     bollinger_std: float = 2.0
     macd_fast: int = 12
@@ -113,6 +115,7 @@ class StrategyParams:
             volume_sma_period=s.volume_sma_period,
             stop_loss_pct=s.stop_loss_pct,
             take_profit_pct=s.take_profit_pct,
+            take_profit_dollars=s.take_profit_dollars,
             max_hold_minutes=s.max_hold_minutes,
             require_5m_uptrend=s.require_5m_uptrend,
             require_15m_uptrend=s.require_15m_uptrend,
@@ -122,6 +125,7 @@ class StrategyParams:
             require_macd_expanding=s.require_macd_expanding,
             bollinger_lower_half_only=s.bollinger_lower_half_only,
             momentum_above_vwap=s.momentum_above_vwap,
+            gap_scalp_mode=s.gap_scalp_mode,
             bollinger_period=s.bollinger_period,
             bollinger_std=s.bollinger_std,
             macd_fast=s.macd_fast,

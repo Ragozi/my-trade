@@ -8,6 +8,8 @@ universe. It makes no selection decisions — that lives in ``filters.py``.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 
 from .models import Candidate
@@ -63,12 +65,41 @@ def change_pct(df: pd.DataFrame, lookback: int) -> float:
     return (end - start) / start
 
 
+def prior_session_close(daily: pd.DataFrame, *, as_of: date | None = None) -> float | None:
+    """Prior completed daily close for overnight/gap study.
+
+    When ``as_of`` is set (typically today), use the last daily bar *before*
+    that date so we never treat an incomplete session as the prior close.
+    """
+    if daily is None or daily.empty or "close" not in daily.columns:
+        return None
+    frame = daily
+    if as_of is not None and isinstance(frame.index, pd.DatetimeIndex):
+        # Compare calendar dates in the index timezone (or naive).
+        idx_dates = frame.index.tz_localize(None).date if frame.index.tz is not None else frame.index.date
+        mask = [d < as_of for d in idx_dates]
+        frame = frame.loc[mask]
+    if frame.empty:
+        return None
+    close = float(frame["close"].iloc[-1])
+    return close if close > 0 else None
+
+
+def gap_pct(last_price: float, prior_close: float | None) -> float:
+    """Fractional gap from prior close to ``last_price`` (0 when unavailable)."""
+    if prior_close is None or prior_close <= 0 or last_price <= 0:
+        return 0.0
+    return (last_price - prior_close) / prior_close
+
+
 def build_candidate(
     symbol: str,
     df: pd.DataFrame,
     *,
     atr_period: int = 14,
     lookback: int = 20,
+    daily: pd.DataFrame | None = None,
+    as_of: date | None = None,
 ) -> Candidate | None:
     """Summarize a symbol's recent bars into a :class:`Candidate`.
 
@@ -80,11 +111,15 @@ def build_candidate(
     pct = atr_pct(df, atr_period)
     if pct is None:
         return None
+    last_price = float(df["close"].iloc[-1])
+    prior = prior_session_close(daily, as_of=as_of) if daily is not None else None
     return Candidate(
         symbol=symbol,
-        last_price=float(df["close"].iloc[-1]),
+        last_price=last_price,
         dollar_volume=avg_dollar_volume(df, lookback),
         atr_pct=pct,
         change_pct=change_pct(df, lookback),
         bars=len(df),
+        gap_pct=gap_pct(last_price, prior),
+        prior_close=float(prior or 0.0),
     )

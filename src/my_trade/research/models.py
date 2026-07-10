@@ -118,6 +118,7 @@ class ResearchContext(BaseModel):
     trade_knowledge: tuple[dict[str, Any], ...] = ()
     technical_scans: tuple[dict[str, Any], ...] = ()
     recent_news: tuple[dict[str, Any], ...] = ()
+    overnight_moves: tuple[dict[str, Any], ...] = ()
 
     @field_validator("candidate_symbols", mode="before")
     @classmethod

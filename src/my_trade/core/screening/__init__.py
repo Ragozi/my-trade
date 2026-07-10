@@ -18,6 +18,8 @@ from .metrics import (
     avg_dollar_volume,
     build_candidate,
     change_pct,
+    gap_pct,
+    prior_session_close,
 )
 from .models import Candidate, ScreenerCriteria
 from .screener import Screener
@@ -39,7 +41,9 @@ __all__ = [
     "avg_dollar_volume",
     "build_candidate",
     "change_pct",
+    "gap_pct",
     "passes",
+    "prior_session_close",
     "rank",
     "select_watchlist",
 ]

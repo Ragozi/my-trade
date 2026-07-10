@@ -4,13 +4,14 @@ Automated weekday start/stop for the paper bot stack.
 
 | Task | Time (local) | Action |
 |------|----------------|--------|
-| **My-Trade Start** | Mon–Fri **7:30 AM** | API + UI + paper bot |
+| **My-Trade Start** | Mon–Fri **3:30 AM** | Wake PC + API + UI + paper bot |
 | **My-Trade Stop** | Mon–Fri **3:00 PM** | Kill ports 8000/8080 + bot windows |
 
 Times assume your PC uses **US Central** local time (CDT/CST).
 
-- **7:30 AM CT** = **8:30 AM ET** — about **1 hour before** cash open (8:30 AM CT / 9:30 AM ET).
-- During that premarket hour the bot warms the screener watchlist and may run research; **new entries stay gated until cash open**.
+- **3:30 AM CT** ≈ **4:30 AM ET** — early overnight study window.
+- Research / screener may run from **4:00 ET** (3:00 CT) through cash close so the bot can read overnight gaps and news before premarket.
+- **New entries stay gated until cash open** (9:30 ET / 8:30 CT), and with opening-scalp mode only until ~10:00 ET.
 - **3:00 PM CT** matches cash close (4:00 PM ET).
 
 ## One-time setup
@@ -22,11 +23,21 @@ powershell -ExecutionPolicy Bypass -File scripts\register_scheduled_tasks.ps1
 
 Re-run the script after changing start/stop times so Task Scheduler picks up the new triggers.
 
+## Wake from sleep
+
+The start task uses **WakeToRun**. Also enable wake timers so Windows will leave sleep:
+
+1. **Settings → System → Power → Screen and sleep** (or classic Power Options)
+2. **Change plan settings → Change advanced power settings**
+3. **Sleep → Allow wake timers → Enable** (and On battery if needed)
+
+The machine must be able to wake (sleep OK; hibernate/fully off is less reliable).
+
 ## Requirements
 
 - Windows user **logged in** at start time (tasks run interactively so cmd windows can open).
 - `.venv`, Node.js, and `.env` configured as for manual launch.
-- PC awake at **7:30 AM** (disable sleep during market hours or use wake timers).
+- Prefer sleep + wake timers over shutting down overnight.
 
 ## Logs
 

@@ -12,6 +12,7 @@ from my_trade.core.market_calendar import (
     is_am_momentum_window,
     is_equity_regular_session,
     is_equity_research_window,
+    is_opening_scalp_window,
     make_session_guard,
 )
 
@@ -41,9 +42,32 @@ class TestEquityRegularSession:
         assert is_equity_regular_session(naive) is True
 
 
+class TestOpeningScalpWindow:
+    def test_at_open(self) -> None:
+        assert is_opening_scalp_window(_utc(2026, 6, 17, 13, 30)) is True  # 09:30 ET
+
+    def test_inside_first_30(self) -> None:
+        assert is_opening_scalp_window(_utc(2026, 6, 17, 13, 45)) is True  # 09:45 ET
+
+    def test_ends_at_10(self) -> None:
+        assert is_opening_scalp_window(_utc(2026, 6, 17, 14, 0)) is False  # 10:00 ET
+
+    def test_premarket_excluded(self) -> None:
+        assert is_opening_scalp_window(_utc(2026, 6, 17, 13, 0)) is False  # 09:00 ET
+
+    def test_custom_end(self) -> None:
+        assert is_opening_scalp_window(
+            _utc(2026, 6, 17, 14, 15), end_hour=10, end_minute=30
+        ) is True
+
+
 class TestAmMomentumWindow:
+    def test_early_overnight_study(self) -> None:
+        # 08:00 UTC = 04:00 ET — early research / faster screener window
+        assert is_am_momentum_window(_utc(2026, 6, 17, 8, 0)) is True
+
     def test_premarket_warmup(self) -> None:
-        # 12:30 UTC = 08:30 ET — one hour before cash open
+        # 12:30 UTC = 08:30 ET — classic premarket hour
         assert is_am_momentum_window(_utc(2026, 6, 17, 12, 30)) is True
 
     def test_inside_opening_range(self) -> None:
@@ -56,6 +80,11 @@ class TestAmMomentumWindow:
 
 
 class TestResearchWindow:
+    def test_early_overnight_allowed(self) -> None:
+        # 08:00 UTC = 04:00 ET (≈3:00 CT) — overnight gap study
+        assert is_equity_research_window(_utc(2026, 6, 17, 8, 0)) is True
+        assert is_equity_regular_session(_utc(2026, 6, 17, 8, 0)) is False
+
     def test_premarket_allowed(self) -> None:
         assert is_equity_research_window(_utc(2026, 6, 17, 12, 30)) is True  # 08:30 ET
         assert is_equity_regular_session(_utc(2026, 6, 17, 12, 30)) is False
@@ -63,8 +92,9 @@ class TestResearchWindow:
     def test_cash_session_allowed(self) -> None:
         assert is_equity_research_window(_utc(2026, 6, 17, 17, 0)) is True  # 13:00 ET
 
-    def test_overnight_blocked(self) -> None:
-        assert is_equity_research_window(_utc(2026, 6, 17, 11, 0)) is False  # 07:00 ET
+    def test_before_research_window_blocked(self) -> None:
+        # 07:00 UTC = 03:00 ET — still too early
+        assert is_equity_research_window(_utc(2026, 6, 17, 7, 0)) is False
 
 
 class TestSessionGuard:

@@ -52,6 +52,22 @@ def check_rsi(
 ) -> ConditionResult:
     if rsi is None:
         return ConditionResult(False, "RSI unavailable")
+    if params.gap_scalp_mode:
+        # Momentum runners: RSI_OVERSOLD is a *floor* (strength). Do not block
+        # high RSI at entry — AM gappers often print 70+; exit uses overbought.
+        if rsi < params.rsi_oversold:
+            return ConditionResult(
+                False,
+                f"RSI={rsi:.1f} < momentum floor {params.rsi_oversold:.0f}",
+            )
+        if params.require_rsi_turning_up:
+            if rsi_prev is None:
+                return ConditionResult(False, "RSI prev unavailable")
+            if rsi <= rsi_prev:
+                return ConditionResult(
+                    False, f"RSI not turning up ({rsi_prev:.1f} -> {rsi:.1f})"
+                )
+        return ConditionResult(True, f"RSI momentum OK ({rsi:.1f})")
     if rsi > params.rsi_oversold:
         return ConditionResult(False, f"RSI={rsi:.1f} > {params.rsi_oversold:.0f}")
     if params.require_rsi_turning_up:
@@ -60,6 +76,13 @@ def check_rsi(
         if rsi <= rsi_prev:
             return ConditionResult(False, f"RSI not turning up ({rsi_prev:.1f} -> {rsi:.1f})")
     return ConditionResult(True, f"RSI OK ({rsi:.1f})")
+
+
+def compute_take_profit_price(entry_price: float, params: StrategyParams) -> float:
+    """Dollar TP wins when set (AM scalps); otherwise percent bracket."""
+    if params.take_profit_dollars > 0:
+        return round(entry_price + params.take_profit_dollars, 2)
+    return round(entry_price * (1.0 + params.take_profit_pct), 2)
 
 
 def check_macd(
@@ -144,7 +167,7 @@ def build_signal(
 ) -> Signal:
     """Construct a long signal with bracket prices derived from the entry."""
     stop_price = round(entry_price * (1.0 - params.stop_loss_pct), 2)
-    take_profit_price = round(entry_price * (1.0 + params.take_profit_pct), 2)
+    take_profit_price = compute_take_profit_price(entry_price, params)
     trimmed = reasons[:6]
     confidence = min(1.0, len(trimmed) / 6.0)
     return Signal(
@@ -177,7 +200,7 @@ def decide_exit(
     if rsi is not None and rsi >= params.rsi_overbought:
         return "rsi_overbought"
     stop_price = entry_price * (1.0 - params.stop_loss_pct)
-    take_profit_price = entry_price * (1.0 + params.take_profit_pct)
+    take_profit_price = compute_take_profit_price(entry_price, params)
     if last_low <= stop_price:
         return "stop_loss"
     if last_high >= take_profit_price:

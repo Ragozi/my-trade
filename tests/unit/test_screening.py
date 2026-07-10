@@ -29,7 +29,9 @@ from my_trade.core.screening import (
     avg_dollar_volume,
     build_candidate,
     change_pct,
+    gap_pct,
     passes,
+    prior_session_close,
     rank,
     select_watchlist,
 )
@@ -71,6 +73,8 @@ def candidate(
     price: float = 100.0,
     bars: int = 30,
     chg: float = 0.0,
+    gap: float = 0.0,
+    prior: float = 0.0,
 ) -> Candidate:
     return Candidate(
         symbol=symbol,
@@ -79,6 +83,8 @@ def candidate(
         atr_pct=atr,
         change_pct=chg,
         bars=bars,
+        gap_pct=gap,
+        prior_close=prior,
     )
 
 
@@ -118,6 +124,40 @@ class TestMetrics:
     def test_build_candidate_none_on_insufficient(self) -> None:
         assert build_candidate("X", make_frame(n=5), atr_period=14) is None
 
+    def test_gap_pct_and_prior_close(self) -> None:
+        assert gap_pct(110.0, 100.0) == 0.10
+        assert gap_pct(90.0, 100.0) == -0.10
+        assert gap_pct(100.0, None) == 0.0
+        daily = pd.DataFrame(
+            {"close": [95.0, 100.0]},
+            index=pd.DatetimeIndex(["2026-06-16", "2026-06-17"]),
+        )
+        assert prior_session_close(daily, as_of=datetime(2026, 6, 18).date()) == 100.0
+        # Incomplete "today" bar must not become prior close.
+        daily_today = pd.DataFrame(
+            {"close": [95.0, 100.0, 105.0]},
+            index=pd.DatetimeIndex(["2026-06-16", "2026-06-17", "2026-06-18"]),
+        )
+        assert prior_session_close(daily_today, as_of=datetime(2026, 6, 18).date()) == 100.0
+
+    def test_build_candidate_includes_overnight_gap(self) -> None:
+        intraday = make_frame(close=110.0)
+        daily = pd.DataFrame(
+            {"close": [100.0]},
+            index=pd.DatetimeIndex(["2026-06-17"]),
+        )
+        cand = build_candidate(
+            "GAP",
+            intraday,
+            atr_period=14,
+            lookback=20,
+            daily=daily,
+            as_of=datetime(2026, 6, 18).date(),
+        )
+        assert cand is not None
+        assert cand.prior_close == 100.0
+        assert cand.gap_pct == 0.10
+
 
 # --------------------------------------------------------------------------- #
 # Filters / ranking
@@ -149,6 +189,44 @@ class TestFilters:
     def test_rejects_low_momentum(self) -> None:
         crit = ScreenerCriteria(min_change_pct=0.02)
         assert passes(candidate("A", atr=0.02, dv=1000, chg=0.01), crit) is False
+
+    def test_accepts_overnight_gap_as_momentum(self) -> None:
+        # Premarket: flat intraday change but a real overnight gap.
+        crit = ScreenerCriteria(min_change_pct=0.02, min_gap_pct=0.0)
+        assert (
+            passes(candidate("A", atr=0.02, dv=1000, chg=0.0, gap=0.05), crit) is True
+        )
+
+    def test_rejects_below_min_gap(self) -> None:
+        crit = ScreenerCriteria(min_gap_pct=0.03)
+        assert (
+            passes(candidate("A", atr=0.02, dv=1000, chg=0.10, gap=0.01), crit) is False
+        )
+
+    def test_require_premarket_up(self) -> None:
+        crit = ScreenerCriteria(require_premarket_up=True, min_gap_pct=0.02)
+        assert (
+            passes(candidate("A", atr=0.02, dv=1000, chg=0.01, gap=0.05), crit) is True
+        )
+        assert (
+            passes(candidate("B", atr=0.02, dv=1000, chg=-0.01, gap=0.05), crit)
+            is False
+        )
+
+    def test_rank_prefers_gap_when_weighted(self) -> None:
+        crit = ScreenerCriteria(
+            top_n=2,
+            weight_volatility=0.0,
+            weight_liquidity=0.0,
+            weight_momentum=0.0,
+            weight_gap=1.0,
+        )
+        cands = [
+            candidate("FLAT", atr=0.05, dv=1000, gap=0.0),
+            candidate("GAPPER", atr=0.02, dv=1000, gap=0.08),
+        ]
+        ranked = rank(cands, crit)
+        assert ranked[0].symbol == "GAPPER"
 
     def test_rank_prefers_momentum_when_weighted(self) -> None:
         crit = ScreenerCriteria(
@@ -281,7 +359,8 @@ class TestScreener:
 
         first = screener.select()
         calls_after_first = data.calls
-        assert calls_after_first == 3  # one screen pass over the universe
+        # Each symbol: intraday bars + daily bars for overnight gap.
+        assert calls_after_first == 6
 
         # Within the refresh window: cached, no new data calls.
         clock[0] = NOW + timedelta(seconds=50)
@@ -291,7 +370,7 @@ class TestScreener:
         # Past the refresh window: re-screens.
         clock[0] = NOW + timedelta(seconds=150)
         screener.select()
-        assert data.calls == calls_after_first + 3
+        assert data.calls == calls_after_first + 6
 
     def test_failsafe_skips_bad_symbol(self) -> None:
         frames = {"AAA": make_frame(), "CCC": make_frame()}

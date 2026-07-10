@@ -26,8 +26,19 @@ def passes(candidate: Candidate, criteria: ScreenerCriteria) -> bool:
         return False
     if candidate.dollar_volume < criteria.min_dollar_volume:
         return False
-    if candidate.change_pct < criteria.min_change_pct:
+    # Premarket: intraday lookback change can be flat while the overnight gap
+    # is the real move — accept either signal for the momentum floor.
+    momentum = max(candidate.change_pct, candidate.gap_pct)
+    if momentum < criteria.min_change_pct:
         return False
+    if candidate.gap_pct < criteria.min_gap_pct:
+        return False
+    # Gap-and-go: overnight gap up AND still green on the lookback (premarket).
+    if criteria.require_premarket_up:
+        if candidate.gap_pct <= 0:
+            return False
+        if candidate.change_pct < 0:
+            return False
     return criteria.min_atr_pct <= candidate.atr_pct <= criteria.max_atr_pct
 
 
@@ -53,15 +64,19 @@ def rank(candidates: Iterable[Candidate], criteria: ScreenerCriteria) -> list[Ca
         return []
 
     liquidity = _normalize([c.dollar_volume for c in survivors])
-    momentum = _normalize([max(c.change_pct, 0.0) for c in survivors])
+    momentum = _normalize(
+        [max(c.change_pct, c.gap_pct, 0.0) for c in survivors]
+    )
+    gaps = _normalize([max(c.gap_pct, 0.0) for c in survivors])
     scored = [
         replace(
             c,
             score=criteria.weight_volatility * c.atr_pct
             + criteria.weight_liquidity * liq
-            + criteria.weight_momentum * mom,
+            + criteria.weight_momentum * mom
+            + criteria.weight_gap * gap,
         )
-        for c, liq, mom in zip(survivors, liquidity, momentum, strict=True)
+        for c, liq, mom, gap in zip(survivors, liquidity, momentum, gaps, strict=True)
     ]
     scored.sort(key=lambda c: (-c.score, c.symbol))
     return scored[: criteria.top_n]

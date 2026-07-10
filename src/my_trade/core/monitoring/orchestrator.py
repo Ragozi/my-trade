@@ -116,7 +116,12 @@ class TradingOrchestrator:
         trading_capital: float | None = None,
         watchlist: Callable[[], Sequence[str]] | None = None,
         watchlist_fallback_to_static: bool = True,
+        screener_ranked: Callable[[], Sequence[object]] | None = None,
         session_is_open: Callable[[datetime], bool] | None = None,
+        opening_scalp_enabled: bool = False,
+        opening_scalp_end_hour: int = 10,
+        opening_scalp_end_minute: int = 0,
+        opening_scalp_research_optional: bool = True,
         research_advisor: ResearchAdvisor | None = None,
         research_memory: ResearchMemoryStore | None = None,
         research_evaluation: ResearchEvaluationStore | None = None,
@@ -137,7 +142,12 @@ class TradingOrchestrator:
         self._symbols = tuple(symbols)
         self._watchlist = watchlist
         self._watchlist_fallback_to_static = watchlist_fallback_to_static
+        self._screener_ranked = screener_ranked
         self._session_is_open = session_is_open
+        self._opening_scalp_enabled = opening_scalp_enabled
+        self._opening_scalp_end_hour = opening_scalp_end_hour
+        self._opening_scalp_end_minute = opening_scalp_end_minute
+        self._opening_scalp_research_optional = opening_scalp_research_optional
         self._research = research_advisor
         self._memory = research_memory
         self._evaluation = research_evaluation
@@ -185,8 +195,10 @@ class TradingOrchestrator:
         self._state = state
         self._store.save(state)
 
-    def _get_bars(self, symbol: str, timeframe: str) -> pd.DataFrame:
-        return self._data.get_bars(symbol, timeframe, self._bar_limit)
+    def _get_bars(
+        self, symbol: str, timeframe: str, limit: int | None = None
+    ) -> pd.DataFrame:
+        return self._data.get_bars(symbol, timeframe, limit or self._bar_limit)
 
     def _active_symbols(self) -> tuple[str, ...]:
         """Symbols to scan this cycle.
@@ -551,6 +563,7 @@ class TradingOrchestrator:
             )
 
         from my_trade.research.news import fetch_recent_news
+        from my_trade.research.overnight import gather_overnight_moves
         from my_trade.research.technical import gather_technical_scans
 
         technical_scans = gather_technical_scans(
@@ -571,6 +584,49 @@ class TradingOrchestrator:
                 as_of=when,
             )
 
+        session_open = True
+        if self._session_is_open is not None:
+            session_open = self._session_is_open(when)
+
+        ranked_meta: dict[str, dict[str, float]] = {}
+        if self._screener_ranked is not None:
+            try:
+                for c in self._screener_ranked():
+                    sym = str(getattr(c, "symbol", "")).upper()
+                    if not sym:
+                        continue
+                    ranked_meta[sym] = {
+                        "last_price": float(getattr(c, "last_price", 0.0) or 0.0),
+                        "change_pct": float(getattr(c, "change_pct", 0.0) or 0.0),
+                        "dollar_volume": float(getattr(c, "dollar_volume", 0.0) or 0.0),
+                        "prior_close": float(getattr(c, "prior_close", 0.0) or 0.0),
+                        "gap_pct": float(getattr(c, "gap_pct", 0.0) or 0.0),
+                    }
+            except Exception as exc:
+                self._log.debug("screener ranked meta unavailable: %s", exc)
+
+        overnight_moves = gather_overnight_moves(
+            symbols=tuple(candidates),
+            get_bars=self._get_bars,
+            as_of=when,
+            ranked_meta=ranked_meta or None,
+        )
+        # Attach overnight news headlines onto matching rows when present.
+        if recent_news and overnight_moves:
+            by_sym: dict[str, list[str]] = {}
+            for item in recent_news:
+                sym = str(item.get("symbol", "")).upper()
+                headline = str(item.get("headline") or item.get("summary") or "")
+                if sym and headline:
+                    by_sym.setdefault(sym, []).append(headline)
+            overnight_moves = tuple(
+                {
+                    **row,
+                    "news_headlines": by_sym.get(str(row["symbol"]).upper(), [])[:3],
+                }
+                for row in overnight_moves
+            )
+
         context = build_research_context(
             snapshot=snapshot,
             candidate_symbols=candidates,
@@ -588,6 +644,7 @@ class TradingOrchestrator:
             trade_knowledge=trade_knowledge,
             technical_scans=technical_scans,
             recent_news=recent_news,
+            overnight_moves=overnight_moves,
         )
         result = self._research.propose(context, when=when)
         proposal = result.proposal
@@ -653,6 +710,30 @@ class TradingOrchestrator:
                 )
             )
             return actions
+
+        from my_trade.core.market_calendar import is_opening_scalp_window
+
+        in_opening_scalp = is_opening_scalp_window(
+            when,
+            end_hour=self._opening_scalp_end_hour,
+            end_minute=self._opening_scalp_end_minute,
+        )
+        if self._opening_scalp_enabled and not in_opening_scalp:
+            actions.append(
+                CycleAction(
+                    ActionKind.OUTSIDE_ENTRY_WINDOW,
+                    "",
+                    (
+                        f"opening scalp only until "
+                        f"{self._opening_scalp_end_hour:02d}:"
+                        f"{self._opening_scalp_end_minute:02d} ET"
+                    ),
+                )
+            )
+            return actions
+        # Fast open: deterministic signal + avoid veto only (no long-approval wait).
+        research_optional = self._opening_scalp_research_optional and in_opening_scalp
+
         for symbol in self._active_symbols():
             sym = normalize_symbol(symbol)
             if sym not in open_symbols and sym in self._state.position_stops:
@@ -687,17 +768,24 @@ class TradingOrchestrator:
                 else None
             )
             if self._research is not None and proposal is not None:
-                veto = (
-                    self._research.entry_veto_reason(
+                veto_kwargs: dict[str, object] = {"sticky_idea": sticky}
+                if research_optional:
+                    veto_kwargs["require_long_approval"] = False
+                veto = None
+                if hasattr(self._research, "entry_veto_reason"):
+                    try:
+                        veto = self._research.entry_veto_reason(
+                            symbol, proposal, **veto_kwargs
+                        )
+                    except TypeError:
+                        veto = self._research.entry_veto_reason(
+                            symbol, proposal, sticky_idea=sticky
+                        )
+                if veto is None and not research_optional:
+                    if not self._research.allows_entry(
                         symbol, proposal, sticky_idea=sticky
-                    )
-                    if hasattr(self._research, "entry_veto_reason")
-                    else None
-                )
-                if veto is None and not self._research.allows_entry(
-                    symbol, proposal, sticky_idea=sticky
-                ):
-                    veto = "research blocked entry"
+                    ):
+                        veto = "research blocked entry"
                 if veto is not None:
                     actions.append(
                         CycleAction(ActionKind.RESEARCH_NOT_APPROVED, symbol, veto)

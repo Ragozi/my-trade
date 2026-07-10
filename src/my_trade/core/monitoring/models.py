@@ -20,6 +20,7 @@ class ActionKind(StrEnum):
     SKIP_OPEN_POSITION = "skip_open_position"
     SKIP_MAX_ENTRIES = "skip_max_entries"
     SESSION_CLOSED = "session_closed"
+    OUTSIDE_ENTRY_WINDOW = "outside_entry_window"
     RESEARCH_PROPOSAL = "research_proposal"
     RESEARCH_SKIPPED = "research_skipped"
     RESEARCH_NOT_APPROVED = "research_not_approved"

@@ -119,17 +119,23 @@ class ResearchAdvisor:
         proposal: ClaudeProposal,
         *,
         sticky_idea: TradeIdea | None = None,
+        require_long_approval: bool | None = None,
     ) -> bool:
         """Whether deterministic entry may proceed for this symbol."""
         from my_trade.research.gating import allows_entry_with_gates
 
+        approval = (
+            self._config.require_approval_for_entry
+            if require_long_approval is None
+            else require_long_approval
+        )
         return allows_entry_with_gates(
             proposal,
             symbol,
             min_confidence=self._config.min_confidence,
             block_avoid=self._config.block_avoid_for_entry,
             block_hold=self._config.block_hold_for_entry,
-            require_long_approval=self._config.require_approval_for_entry,
+            require_long_approval=approval,
             sticky_idea=sticky_idea,
             entry_veto_min_confidence=self._config.entry_veto_min_confidence,
         )
@@ -140,16 +146,22 @@ class ResearchAdvisor:
         proposal: ClaudeProposal,
         *,
         sticky_idea: TradeIdea | None = None,
+        require_long_approval: bool | None = None,
     ) -> str | None:
         from my_trade.research.gating import research_veto_reason
 
+        approval = (
+            self._config.require_approval_for_entry
+            if require_long_approval is None
+            else require_long_approval
+        )
         return research_veto_reason(
             proposal,
             symbol,
             min_confidence=self._config.min_confidence,
             block_avoid=self._config.block_avoid_for_entry,
             block_hold=self._config.block_hold_for_entry,
-            require_long_approval=self._config.require_approval_for_entry,
+            require_long_approval=approval,
             sticky_idea=sticky_idea,
             entry_veto_min_confidence=self._config.entry_veto_min_confidence,
         )

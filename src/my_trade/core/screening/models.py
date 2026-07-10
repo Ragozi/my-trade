@@ -33,6 +33,9 @@ class Candidate:
     change_pct: float
     bars: int
     score: float = 0.0
+    # Overnight / gap study (vs prior regular-session close).
+    gap_pct: float = 0.0
+    prior_close: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -50,11 +53,14 @@ class ScreenerCriteria:
     min_atr_pct: float = 0.0
     max_atr_pct: float = float("inf")
     min_change_pct: float = 0.0
+    min_gap_pct: float = 0.0
+    require_premarket_up: bool = False
     min_bars: int = 20
     top_n: int = 5
     weight_volatility: float = 1.0
     weight_liquidity: float = 1.0
     weight_momentum: float = 0.0
+    weight_gap: float = 0.0
 
     def validate(self) -> None:
         if self.min_price < 0:
@@ -75,5 +81,9 @@ class ScreenerCriteria:
             raise ValueError("weights must be >= 0")
         if self.weight_momentum < 0:
             raise ValueError("weight_momentum must be >= 0")
+        if self.weight_gap < 0:
+            raise ValueError("weight_gap must be >= 0")
         if self.min_change_pct < 0:
             raise ValueError("min_change_pct must be >= 0")
+        if self.min_gap_pct < 0:
+            raise ValueError("min_gap_pct must be >= 0")

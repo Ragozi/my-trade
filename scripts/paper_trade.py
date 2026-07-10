@@ -238,19 +238,34 @@ def log_day_trade_banner(settings: Settings) -> None:
     if sc.enabled and sc.movers_only:
         log.info(
             "DAY-TRADE MODE | movers-only %s $%.0f–$%.0f | top_n=%d | "
-            "min_change=%.1f%% | am_refresh=%ds | momentum_vwap=%s | "
-            "vol_spike=%s | TP=%.1f%% SL=%.2f%% | max_daily_entries=%d | "
-            "static_fallback=%s | symbols=%s",
+            "min_change=%.1f%% min_gap=%.1f%% premarket_up=%s | "
+            "am_refresh=%ds | gap_scalp=%s opening_window=%s | "
+            "momentum_vwap=%s vol_spike=%s | TP=%s SL=%.2f%% hold=%dm | "
+            "max_daily_entries=%d | static_fallback=%s | symbols=%s",
             sc.movers_source,
             sc.min_price,
             sc.max_price if sc.max_price != float("inf") else 0,
             sc.top_n,
             sc.min_change_pct * 100,
+            sc.min_gap_pct * 100,
+            sc.require_premarket_up,
             sc.am_refresh_seconds,
+            st.gap_scalp_mode,
+            (
+                f"9:30–{settings.runtime.opening_scalp_end_hour:02d}:"
+                f"{settings.runtime.opening_scalp_end_minute:02d}ET"
+                if settings.runtime.opening_scalp_enabled
+                else "all-session"
+            ),
             st.momentum_above_vwap,
             st.require_volume_spike,
-            st.take_profit_pct * 100,
+            (
+                f"${st.take_profit_dollars:.2f}"
+                if st.take_profit_dollars > 0
+                else f"{st.take_profit_pct * 100:.1f}%"
+            ),
             st.stop_loss_pct * 100,
+            st.max_hold_minutes,
             settings.risk.max_daily_entries,
             sc.fallback_to_static_symbols,
             ",".join(settings.symbols) if settings.symbols else "(none)",
@@ -314,7 +329,12 @@ def build_orchestrator(
         trading_capital=settings.risk.trading_capital or None,
         watchlist=screener.select if screener is not None else None,
         watchlist_fallback_to_static=settings.screener.fallback_to_static_symbols,
+        screener_ranked=(lambda: screener.ranked) if screener is not None else None,
         session_is_open=make_session_guard(settings.asset_class),
+        opening_scalp_enabled=settings.runtime.opening_scalp_enabled,
+        opening_scalp_end_hour=settings.runtime.opening_scalp_end_hour,
+        opening_scalp_end_minute=settings.runtime.opening_scalp_end_minute,
+        opening_scalp_research_optional=settings.runtime.opening_scalp_research_optional,
         research_advisor=research_advisor,  # type: ignore[arg-type]
         research_memory=research_memory,  # type: ignore[arg-type]
         research_evaluation=research_evaluation,  # type: ignore[arg-type]

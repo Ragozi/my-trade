@@ -18,7 +18,9 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 _NY = ZoneInfo("America/New_York")
-_PREOPEN = time(8, 30)  # one hour before cash open — screener/research warmup
+# Early overnight study window (≈3:00 AM CT) — research/screener warm-up; entries stay 9:30.
+_RESEARCH_PREOPEN = time(4, 0)
+_PREOPEN = time(8, 30)  # classic premarket hour before cash open
 _OPEN = time(9, 30)
 _CLOSE = time(16, 0)
 
@@ -36,14 +38,34 @@ def _ny_weekday_time(now: datetime) -> tuple[int, time] | None:
 
 
 def is_am_momentum_window(now: datetime) -> bool:
-    """True from premarket warmup through the opening range (8:30–11:30 ET).
+    """True from early overnight study through the opening range (4:00–11:30 ET).
 
-    Used to refresh the screener faster ahead of and into the cash open.
+    Used to refresh the screener faster while studying overnight/premarket movers.
     """
     parts = _ny_weekday_time(now)
     if parts is None:
         return False
-    return _PREOPEN <= parts[1] < time(11, 30)
+    return _RESEARCH_PREOPEN <= parts[1] < time(11, 30)
+
+
+def is_opening_scalp_window(
+    now: datetime,
+    *,
+    end_hour: int = 10,
+    end_minute: int = 0,
+) -> bool:
+    """True during the cash-open scalp window (default 9:30–10:00 ET).
+
+    Classic gap-and-go: overnight gappers often pop hard in the first 30 minutes,
+    then fade — this is the long-scalp entry window only.
+    """
+    parts = _ny_weekday_time(now)
+    if parts is None:
+        return False
+    end = time(end_hour, end_minute)
+    if end <= _OPEN:
+        return False
+    return _OPEN <= parts[1] < end
 
 
 def is_equity_regular_session(now: datetime) -> bool:
@@ -59,15 +81,15 @@ def is_equity_regular_session(now: datetime) -> bool:
 
 
 def is_equity_research_window(now: datetime) -> bool:
-    """True during premarket warmup + cash session (8:30–16:00 ET weekdays).
+    """True from early overnight study through cash close (4:00–16:00 ET weekdays).
 
-    Entries stay gated to the regular session; research/screener may run here so
-    the watchlist is warm before the open.
+    Starts ~3:00 AM CT so the bot can study overnight gaps / news before
+    premarket. Entries stay gated to the regular cash session (9:30 ET).
     """
     parts = _ny_weekday_time(now)
     if parts is None:
         return False
-    return _PREOPEN <= parts[1] < _CLOSE
+    return _RESEARCH_PREOPEN <= parts[1] < _CLOSE
 
 
 def make_session_guard(asset_class: str) -> Callable[[datetime], bool]:

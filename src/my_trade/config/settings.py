@@ -120,6 +120,7 @@ class StrategySettings:
     volume_sma_period: int = 20
     stop_loss_pct: float = 0.0065
     take_profit_pct: float = 0.013
+    take_profit_dollars: float = 0.0
     max_hold_minutes: int = 90
     require_5m_uptrend: bool = False
     require_15m_uptrend: bool = True
@@ -130,6 +131,7 @@ class StrategySettings:
     require_macd_expanding: bool = True
     bollinger_lower_half_only: bool = True
     momentum_above_vwap: bool = False
+    gap_scalp_mode: bool = False
     bollinger_period: int = 20
     bollinger_std: float = 2.0
     macd_fast: int = 12
@@ -159,11 +161,14 @@ class ScreenerSettings:
     min_atr_pct: float = 0.0
     max_atr_pct: float = 1.0
     min_change_pct: float = 0.0
+    min_gap_pct: float = 0.0
+    require_premarket_up: bool = False
     min_bars: int = 20
     top_n: int = 5
     weight_volatility: float = 1.0
     weight_liquidity: float = 1.0
     weight_momentum: float = 0.0
+    weight_gap: float = 0.0
     # Dynamic equities universe (Alpaca screener); ignored for crypto.
     seed_symbols: tuple[str, ...] = ()
     exclude_symbols: tuple[str, ...] = ()
@@ -187,11 +192,14 @@ class ScreenerSettings:
             min_atr_pct=self.min_atr_pct,
             max_atr_pct=self.max_atr_pct,
             min_change_pct=self.min_change_pct,
+            min_gap_pct=self.min_gap_pct,
+            require_premarket_up=self.require_premarket_up,
             min_bars=self.min_bars,
             top_n=self.top_n,
             weight_volatility=self.weight_volatility,
             weight_liquidity=self.weight_liquidity,
             weight_momentum=self.weight_momentum,
+            weight_gap=self.weight_gap,
         )
 
 
@@ -209,6 +217,13 @@ class RuntimeSettings:
     log_dir: str = "logs"
     daily_state_file: str = "logs/daily_state.json"
     journal_db: str = "logs/journal.db"
+    # Equities AM gap-scalp: only open new longs in this ET window after cash open.
+    # Empty / disabled = allow entries all regular session.
+    opening_scalp_enabled: bool = False
+    opening_scalp_end_hour: int = 10
+    opening_scalp_end_minute: int = 0
+    # During the opening scalp window, skip require-long-approval (still honor avoid).
+    opening_scalp_research_optional: bool = True
 
 
 @dataclass(frozen=True)
@@ -398,6 +413,7 @@ def _load_strategy(env: Mapping[str, str]) -> StrategySettings:
         volume_sma_period=env_int(env, "VOLUME_SMA_PERIOD", 20),
         stop_loss_pct=env_float(env, "STOP_LOSS_PCT", 0.0065),
         take_profit_pct=env_float(env, "TAKE_PROFIT_PCT", 0.013),
+        take_profit_dollars=env_float(env, "TAKE_PROFIT_DOLLARS", 0.0),
         max_hold_minutes=env_int(env, "MAX_HOLD_MINUTES", 90),
         require_5m_uptrend=env_bool(env, "REQUIRE_5M_UPTREND", False),
         require_15m_uptrend=env_bool(env, "REQUIRE_15M_UPTREND", True),
@@ -408,6 +424,7 @@ def _load_strategy(env: Mapping[str, str]) -> StrategySettings:
         require_macd_expanding=env_bool(env, "REQUIRE_MACD_EXPANDING", True),
         bollinger_lower_half_only=env_bool(env, "BOLLINGER_LOWER_HALF_ONLY", True),
         momentum_above_vwap=env_bool(env, "MOMENTUM_ABOVE_VWAP", False),
+        gap_scalp_mode=env_bool(env, "GAP_SCALP_MODE", False),
         bollinger_period=env_int(env, "BOLLINGER_PERIOD", 20),
         bollinger_std=env_float(env, "BOLLINGER_STD", 2.0),
         macd_fast=env_int(env, "MACD_FAST", 12),
@@ -445,11 +462,14 @@ def _load_screener(env: Mapping[str, str]) -> ScreenerSettings:
         min_atr_pct=env_float(env, "SCREENER_MIN_ATR_PCT", 0.004),
         max_atr_pct=env_float(env, "SCREENER_MAX_ATR_PCT", 1.0),
         min_change_pct=env_float(env, "SCREENER_MIN_CHANGE_PCT", 0.0),
+        min_gap_pct=env_float(env, "SCREENER_MIN_GAP_PCT", 0.0),
+        require_premarket_up=env_bool(env, "SCREENER_REQUIRE_PREMARKET_UP", False),
         min_bars=env_int(env, "SCREENER_MIN_BARS", 10),
         top_n=env_int(env, "SCREENER_TOP_N", 5),
         weight_volatility=env_float(env, "SCREENER_WEIGHT_VOLATILITY", 1.2),
         weight_liquidity=env_float(env, "SCREENER_WEIGHT_LIQUIDITY", 1.0),
         weight_momentum=env_float(env, "SCREENER_WEIGHT_MOMENTUM", 0.0),
+        weight_gap=env_float(env, "SCREENER_WEIGHT_GAP", 0.0),
         use_movers=env_bool(env, "SCREENER_USE_MOVERS", False),
         movers_source=env_str(env, "SCREENER_MOVERS_SOURCE", "actives"),
         movers_top=env_int(env, "SCREENER_MOVERS_TOP", 25),
@@ -469,6 +489,12 @@ def _load_runtime(env: Mapping[str, str]) -> RuntimeSettings:
         log_dir=env_str(env, "LOG_DIR", "logs"),
         daily_state_file=env_str(env, "DAILY_STATE_FILE", "logs/daily_state.json"),
         journal_db=env_str(env, "JOURNAL_DB", "logs/journal.db"),
+        opening_scalp_enabled=env_bool(env, "OPENING_SCALP_ENABLED", False),
+        opening_scalp_end_hour=env_int(env, "OPENING_SCALP_END_HOUR", 10),
+        opening_scalp_end_minute=env_int(env, "OPENING_SCALP_END_MINUTE", 0),
+        opening_scalp_research_optional=env_bool(
+            env, "OPENING_SCALP_RESEARCH_OPTIONAL", True
+        ),
     )
 
 

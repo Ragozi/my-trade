@@ -82,6 +82,11 @@ class TestRsi:
         pr = params(require_rsi_turning_up=False)
         assert check_rsi(40.0, 41.0, pr).passed is True
 
+    def test_gap_scalp_uses_rsi_floor(self) -> None:
+        pr = params(gap_scalp_mode=True, rsi_oversold=50.0, require_rsi_turning_up=False)
+        assert check_rsi(45.0, 40.0, pr).passed is False
+        assert check_rsi(70.0, 68.0, pr).passed is True
+
 
 class TestMacd:
     def test_unavailable_fails(self) -> None:
@@ -182,6 +187,11 @@ class TestBuildSignal:
         assert sig.stop_price == round(100_000.0 * (1 - P.stop_loss_pct), 2)
         assert sig.take_profit_price == round(100_000.0 * (1 + P.take_profit_pct), 2)
 
+    def test_dollar_take_profit_overrides_pct(self) -> None:
+        pr = params(take_profit_dollars=1.5, take_profit_pct=0.08)
+        sig = build_signal("GAP", 10.0, pr, reasons=("a",))
+        assert sig.take_profit_price == 11.5
+
     def test_confidence_and_reason_trimming(self) -> None:
         reasons = tuple(f"r{i}" for i in range(10))
         sig = build_signal("BTC/USD", 100.0, P, reasons=reasons)
@@ -226,6 +236,14 @@ class TestDecideExit:
         result = decide_exit(
             last_low=entry, last_high=tp + 0.01, rsi=None,
             hold_minutes=1.0, entry_price=entry, params=P,
+        )
+        assert result == "take_profit"
+
+    def test_dollar_take_profit_exit(self) -> None:
+        pr = params(take_profit_dollars=2.0, take_profit_pct=0.5)
+        result = decide_exit(
+            last_low=10.0, last_high=12.05, rsi=None,
+            hold_minutes=1.0, entry_price=10.0, params=pr,
         )
         assert result == "take_profit"
 
