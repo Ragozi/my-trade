@@ -25,7 +25,6 @@ from my_trade.core.risk import (
     TradeRequest,
     evaluate_trade,
 )
-
 from my_trade.data import normalize_symbol
 
 from .broker import BrokerClient

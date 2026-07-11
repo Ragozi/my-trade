@@ -53,7 +53,8 @@ class RiskSettings:
     max_risk_per_trade_pct: float = 0.02      # R1
     max_total_open_risk_pct: float = 0.07     # R2
     daily_loss_limit_pct: float = 0.05        # R3
-    daily_profit_target_pct: float = 0.0       # optional R+ : halt entries when day goal hit (0=off)
+    # optional R+ : halt entries when day goal hit (0=off)
+    daily_profit_target_pct: float = 0.0
     max_drawdown_pct: float = 0.15            # R4
     max_concurrent_positions: int = 1
     max_entries_per_symbol_per_day: int = 10
