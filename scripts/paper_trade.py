@@ -654,9 +654,10 @@ def run_loop(settings: Settings) -> int:
     research, memory, evaluation = build_research_stack(settings)
     knowledge = build_trade_knowledge(settings)
     if memory is not None:
-        # Drop yesterday's weak sticky avoids so a fresh session can trade.
-        memory.clear_stance()
-        log.info("Cleared sticky research stance cache for new session")
+        # Keep same-day vetoes across restarts; reset only stale research stances.
+        cleared = memory.clear_stale_stance(datetime.now(UTC).date())
+        suffix = "y" if cleared == 1 else "ies"
+        log.info("Cleared %d stale research stance cache entr%s", cleared, suffix)
     log_day_trade_banner(settings)
     log_research_status(settings, research)
     orchestrator = build_orchestrator(

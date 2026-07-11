@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from my_trade.observability.journal import Journal
@@ -247,4 +247,43 @@ def test_clear_stance(tmp_path: Path) -> None:
         (TradeIdea(symbol="ABCD", action=TradeAction.LONG, confidence=0.8, thesis="ok"),)
     )
     store.clear_stance()
+    assert store.stance_for_symbol("ABCD") is None
+
+
+def test_clear_stale_stance_preserves_same_day_veto(tmp_path: Path) -> None:
+    path = tmp_path / "mem.json"
+    store = ResearchMemoryStore(path)
+    recorded_at = datetime(2026, 7, 11, 13, 30, tzinfo=UTC)
+    store.note_proposals(
+        (
+            TradeIdea(
+                symbol="ABCD",
+                action=TradeAction.AVOID,
+                confidence=0.9,
+                thesis="Opening gap is fading",
+            ),
+        ),
+        when=recorded_at,
+    )
+
+    store = ResearchMemoryStore(path)
+    assert store.clear_stale_stance(date(2026, 7, 11)) == 0
+    assert store.stance_for_symbol("ABCD") is not None
+
+
+def test_clear_stale_stance_drops_prior_day_veto(tmp_path: Path) -> None:
+    store = ResearchMemoryStore(tmp_path / "mem.json")
+    store.note_proposals(
+        (
+            TradeIdea(
+                symbol="ABCD",
+                action=TradeAction.AVOID,
+                confidence=0.9,
+                thesis="Weak close",
+            ),
+        ),
+        when=datetime(2026, 7, 10, 20, 0, tzinfo=UTC),
+    )
+
+    assert store.clear_stale_stance(date(2026, 7, 11)) == 1
     assert store.stance_for_symbol("ABCD") is None

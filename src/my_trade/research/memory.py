@@ -6,7 +6,7 @@ import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from my_trade.observability.journal import Journal
@@ -33,6 +33,7 @@ class ResearchMemoryStore:
     _reflections: list[ClosedTradeReflection] = field(default_factory=list)
     _thesis_by_symbol: dict[str, str] = field(default_factory=dict)
     _stance_by_symbol: dict[str, TradeIdea] = field(default_factory=dict)
+    _stance_recorded_at: dict[str, datetime] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.path = Path(self.path)
@@ -55,11 +56,27 @@ class ResearchMemoryStore:
         self._thesis_by_symbol = {
             str(k).upper(): str(v) for k, v in (raw.get("thesis_cache") or {}).items()
         }
+        stance_recorded_at = raw.get("stance_recorded_at") or {}
         for sym, item in (raw.get("stance_cache") or {}).items():
+            key = str(sym).upper()
             try:
-                self._stance_by_symbol[str(sym).upper()] = TradeIdea.model_validate(item)
+                self._stance_by_symbol[key] = TradeIdea.model_validate(item)
             except Exception as exc:
                 _log.debug("skip invalid stance for %s: %s", sym, exc)
+                continue
+            raw_recorded_at = stance_recorded_at.get(sym) or stance_recorded_at.get(key)
+            if raw_recorded_at:
+                try:
+                    recorded_at = datetime.fromisoformat(str(raw_recorded_at))
+                    if recorded_at.tzinfo is None:
+                        recorded_at = recorded_at.replace(tzinfo=UTC)
+                    self._stance_recorded_at[key] = recorded_at
+                except ValueError:
+                    _log.debug(
+                        "skip invalid stance timestamp for %s: %s",
+                        sym,
+                        raw_recorded_at,
+                    )
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,6 +86,11 @@ class ResearchMemoryStore:
             "stance_cache": {
                 sym: idea.model_dump(mode="json")
                 for sym, idea in self._stance_by_symbol.items()
+            },
+            "stance_recorded_at": {
+                sym: recorded_at.isoformat()
+                for sym, recorded_at in self._stance_recorded_at.items()
+                if sym in self._stance_by_symbol
             },
         }
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
@@ -91,17 +113,24 @@ class ResearchMemoryStore:
         self._save()
         return reflection
 
-    def note_proposals(self, ideas: Sequence[TradeIdea]) -> None:
+    def note_proposals(
+        self,
+        ideas: Sequence[TradeIdea],
+        *,
+        when: datetime | None = None,
+    ) -> None:
         """Cache latest research thesis and stance per symbol from proposals.
 
         Skip zero-confidence avoid/hold — those are noise (or failed-model
         fallbacks) and must not sticky-block entries for the rest of the day.
         """
+        recorded_at = when or datetime.now(UTC)
         for idea in ideas:
             sym = idea.symbol.upper()
             if idea.action.value in ("avoid", "hold") and idea.confidence <= 0.0:
                 continue
             self._stance_by_symbol[sym] = idea
+            self._stance_recorded_at[sym] = recorded_at
             if idea.thesis:
                 self._thesis_by_symbol[sym] = idea.thesis
         self._save()
@@ -110,9 +139,27 @@ class ResearchMemoryStore:
         """Drop sticky stance for one symbol, or all symbols when ``symbol`` is None."""
         if symbol is None:
             self._stance_by_symbol.clear()
+            self._stance_recorded_at.clear()
         else:
-            self._stance_by_symbol.pop(symbol.upper(), None)
+            key = symbol.upper()
+            self._stance_by_symbol.pop(key, None)
+            self._stance_recorded_at.pop(key, None)
         self._save()
+
+    def clear_stale_stance(self, today: date) -> int:
+        """Drop sticky stances recorded before ``today``; preserve same-day vetoes."""
+        stale = [
+            sym
+            for sym in self._stance_by_symbol
+            if self._stance_recorded_at.get(sym) is None
+            or self._stance_recorded_at[sym].date() != today
+        ]
+        for sym in stale:
+            self._stance_by_symbol.pop(sym, None)
+            self._stance_recorded_at.pop(sym, None)
+        if stale:
+            self._save()
+        return len(stale)
 
     @property
     def thesis_cache(self) -> dict[str, str]:

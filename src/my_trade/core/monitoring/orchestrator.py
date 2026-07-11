@@ -660,7 +660,7 @@ class TradingOrchestrator:
                 actions.append(CycleAction(ActionKind.RESEARCH_SKIPPED, detail=reason))
             return actions, proposal
         if self._memory is not None:
-            self._memory.note_proposals(proposal.ideas)
+            self._memory.note_proposals(proposal.ideas, when=when)
         self._log.info(
             "research (%s/%s) | %d ideas (%d long) | %s",
             provider,
