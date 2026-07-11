@@ -79,7 +79,6 @@ class RiskSettings:
             "max_risk_per_trade_pct": self.max_risk_per_trade_pct,
             "max_total_open_risk_pct": self.max_total_open_risk_pct,
             "daily_loss_limit_pct": self.daily_loss_limit_pct,
-            "daily_profit_target_pct": self.daily_profit_target_pct,
             "max_drawdown_pct": self.max_drawdown_pct,
         }
         for name, value in pcts.items():
