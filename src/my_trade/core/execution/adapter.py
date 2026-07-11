@@ -48,6 +48,12 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _close_requires_order_cancel(exc: BrokerError) -> bool:
+    """Alpaca reports bracket-held equity shares with held-for-orders wording."""
+    detail = str(exc).lower().replace("-", "_").replace(" ", "_")
+    return "held_for_orders" in detail
+
+
 class ExecutionAdapter:
     """Coordinates idempotency, risk gating, planning, and submission."""
 
@@ -184,16 +190,11 @@ class ExecutionAdapter:
     def close_position(self, symbol: str, *, now: datetime | None = None) -> ExecutionOutcome:
         """Flatten an open position (used by the orchestrator for soft exits).
 
-        Bracket stop/take-profit legs live at the broker; cancel them first so
-        shares are not ``held_for_orders`` when we submit a discretionary exit.
+        Keep bracket stop/take-profit protection intact unless the broker says
+        those open orders are the reason the discretionary close cannot submit.
         """
         when = now or self._clock()
         client_order_id = make_client_order_id(symbol, OrderIntent.EXIT, when)
-        if (
-            self._cancel_open_orders_for_symbol(symbol) > 0
-            and self._cancel_settle_seconds > 0
-        ):
-            self._sleep(self._cancel_settle_seconds)
         try:
             result: OrderResult = with_retries(
                 lambda: self._broker.close_position(symbol),
@@ -201,12 +202,31 @@ class ExecutionAdapter:
                 sleep=self._sleep,
             )
         except BrokerError as exc:
-            return ExecutionOutcome(
-                status=ExecutionStatus.BROKER_ERROR,
-                client_order_id=client_order_id,
-                submitted=False,
-                detail=f"close failed after retries: {exc}",
-            )
+            if not _close_requires_order_cancel(exc):
+                return ExecutionOutcome(
+                    status=ExecutionStatus.BROKER_ERROR,
+                    client_order_id=client_order_id,
+                    submitted=False,
+                    detail=f"close failed after retries: {exc}",
+                )
+            if (
+                self._cancel_open_orders_for_symbol(symbol) > 0
+                and self._cancel_settle_seconds > 0
+            ):
+                self._sleep(self._cancel_settle_seconds)
+            try:
+                result = with_retries(
+                    lambda: self._broker.close_position(symbol),
+                    attempts=self._attempts,
+                    sleep=self._sleep,
+                )
+            except BrokerError as retry_exc:
+                return ExecutionOutcome(
+                    status=ExecutionStatus.BROKER_ERROR,
+                    client_order_id=client_order_id,
+                    submitted=False,
+                    detail=f"close failed after cancelling held orders: {retry_exc}",
+                )
         return ExecutionOutcome(
             status=ExecutionStatus.SUBMITTED,
             client_order_id=client_order_id,
