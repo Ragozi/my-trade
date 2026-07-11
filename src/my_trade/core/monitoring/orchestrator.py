@@ -18,8 +18,8 @@ Safety invariants preserved here:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -660,7 +660,7 @@ class TradingOrchestrator:
                 actions.append(CycleAction(ActionKind.RESEARCH_SKIPPED, detail=reason))
             return actions, proposal
         if self._memory is not None:
-            self._memory.note_proposals(proposal.ideas)
+            self._memory.note_proposals(proposal.ideas, when=when)
         self._log.info(
             "research (%s/%s) | %d ideas (%d long) | %s",
             provider,
@@ -706,7 +706,10 @@ class TradingOrchestrator:
                 CycleAction(
                     ActionKind.SKIP_MAX_ENTRIES,
                     "",
-                    f"daily_entries={self._state.total_entries_today()} max={self._max_daily_entries}",
+                    (
+                        f"daily_entries={self._state.total_entries_today()} "
+                        f"max={self._max_daily_entries}"
+                    ),
                 )
             )
             return actions
@@ -781,11 +784,14 @@ class TradingOrchestrator:
                         veto = self._research.entry_veto_reason(
                             symbol, proposal, sticky_idea=sticky
                         )
-                if veto is None and not research_optional:
-                    if not self._research.allows_entry(
+                if (
+                    veto is None
+                    and not research_optional
+                    and not self._research.allows_entry(
                         symbol, proposal, sticky_idea=sticky
-                    ):
-                        veto = "research blocked entry"
+                    )
+                ):
+                    veto = "research blocked entry"
                 if veto is not None:
                     actions.append(
                         CycleAction(ActionKind.RESEARCH_NOT_APPROVED, symbol, veto)

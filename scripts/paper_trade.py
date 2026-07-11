@@ -52,17 +52,17 @@ from my_trade.core.screening import (  # noqa: E402
     StaticUniverseSource,
     UniverseSource,
 )
+from my_trade.core.screening.build import build_equities_universe  # noqa: E402
 from my_trade.core.strategy import PullbackStrategy, StrategyParams  # noqa: E402
 from my_trade.data import MarketDataProvider  # noqa: E402
 from my_trade.data.alpaca_data import AlpacaDataProvider  # noqa: E402
-from my_trade.core.screening.build import build_equities_universe  # noqa: E402
 from my_trade.data.stock_data import StockHistoricalDataProvider  # noqa: E402
 from my_trade.observability import Journal  # noqa: E402
-from my_trade.research import (
+from my_trade.research import (  # noqa: E402
+    build_postmortem_client,
     build_research_advisor,
     build_research_evaluation,
     build_research_memory,
-    build_postmortem_client,
     build_trade_knowledge,
     research_is_active,
 )
@@ -587,9 +587,8 @@ def run_once(settings: Settings) -> int:
 def log_cycle(result: CycleResult) -> None:
     flag = "HALTED" if result.halted else "ok"
     research_count = sum(1 for a in result.actions if a.kind in _RESEARCH_KINDS)
-    log.info(
-        "cycle %s | equity=$%.2f day_pnl=$%.2f peak=$%.2f open=%d [%s]"
-        + (" | claude_events=%d" % research_count if research_count else ""),
+    message = "cycle %s | equity=$%.2f day_pnl=$%.2f peak=$%.2f open=%d [%s]"
+    args = (
         result.timestamp.strftime("%H:%M:%S"),
         result.equity,
         result.day_pnl,
@@ -597,6 +596,10 @@ def log_cycle(result: CycleResult) -> None:
         result.open_positions,
         flag,
     )
+    if research_count:
+        log.info(message + " | claude_events=%d", *args, research_count)
+    else:
+        log.info(message, *args)
     for action in result.actions:
         if action.kind in _RESEARCH_KINDS:
             log.info(
@@ -654,9 +657,10 @@ def run_loop(settings: Settings) -> int:
     research, memory, evaluation = build_research_stack(settings)
     knowledge = build_trade_knowledge(settings)
     if memory is not None:
-        # Drop yesterday's weak sticky avoids so a fresh session can trade.
-        memory.clear_stance()
-        log.info("Cleared sticky research stance cache for new session")
+        # Keep same-day vetoes across restarts; reset only stale research stances.
+        cleared = memory.clear_stale_stance(datetime.now(UTC).date())
+        suffix = "y" if cleared == 1 else "ies"
+        log.info("Cleared %d stale research stance cache entr%s", cleared, suffix)
     log_day_trade_banner(settings)
     log_research_status(settings, research)
     orchestrator = build_orchestrator(

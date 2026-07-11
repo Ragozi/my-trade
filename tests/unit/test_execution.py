@@ -76,6 +76,7 @@ class FakeBroker:
         *,
         transient_failures: int = 0,
         permanent_error: bool = False,
+        close_errors: list[BrokerError] | None = None,
         existing: dict[str, OrderResult] | None = None,
         open_orders: list[OrderResult] | None = None,
     ) -> None:
@@ -85,6 +86,7 @@ class FakeBroker:
         self.closed: list[str] = []
         self._transient_failures = transient_failures
         self._permanent_error = permanent_error
+        self._close_errors = list(close_errors or [])
         self._existing = existing or {}
         self._open_orders = list(open_orders or [])
 
@@ -114,6 +116,8 @@ class FakeBroker:
 
     def close_position(self, symbol: str) -> OrderResult:
         self.closed.append(symbol)
+        if self._close_errors:
+            raise self._close_errors.pop(0)
         if self._permanent_error:
             raise BrokerError("simulated close reject")
         return OrderResult(
@@ -346,8 +350,26 @@ class TestExecuteEntry:
         assert outcome.status is ExecutionStatus.BROKER_ERROR
         assert outcome.submitted is False
 
-    def test_close_position_cancels_open_orders_first(self) -> None:
+    def test_close_position_does_not_cancel_orders_on_unrelated_error(self) -> None:
         broker = FakeBroker(
+            permanent_error=True,
+            open_orders=[
+                OrderResult(
+                    client_order_id="bracket-stop",
+                    status=OrderStatus.ACCEPTED,
+                    order_id="stop-1",
+                    symbol="MSFT",
+                )
+            ],
+        )
+        outcome = make_adapter(broker).close_position("MSFT", now=NOW)
+        assert outcome.status is ExecutionStatus.BROKER_ERROR
+        assert broker.cancelled == []
+        assert broker.closed == ["MSFT"]
+
+    def test_close_position_cancels_open_orders_only_when_held(self) -> None:
+        broker = FakeBroker(
+            close_errors=[BrokerError("requested qty held_for_orders by bracket legs")],
             open_orders=[
                 OrderResult(
                     client_order_id="bracket-stop",
@@ -366,11 +388,12 @@ class TestExecuteEntry:
         outcome = make_adapter(broker).close_position("MSFT", now=NOW)
         assert outcome.status is ExecutionStatus.SUBMITTED
         assert broker.cancelled == ["stop-1"]
-        assert broker.closed == ["MSFT"]
+        assert broker.closed == ["MSFT", "MSFT"]
 
     def test_close_position_waits_after_cancel(self) -> None:
         slept: list[float] = []
         broker = FakeBroker(
+            close_errors=[BrokerError("shares held for orders")],
             open_orders=[
                 OrderResult(
                     client_order_id="bracket-stop",
