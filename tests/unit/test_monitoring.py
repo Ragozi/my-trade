@@ -41,8 +41,11 @@ from my_trade.core.monitoring.state import entry_time_for
 from my_trade.core.risk import AccountState, RiskLimits
 from my_trade.core.strategy import OrderSide, ScanEvaluation, Signal
 from my_trade.data import normalize_symbol
+from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
+from my_trade.research.models import ClaudeProposal
 
 NOW = datetime(2026, 6, 18, 14, 7, tzinfo=UTC)
+OPENING_WINDOW = datetime(2026, 6, 18, 13, 35, tzinfo=UTC)
 TODAY = NOW.date()
 SYMBOL = "BTC/USD"
 KEY = normalize_symbol(SYMBOL)
@@ -153,6 +156,21 @@ class FakeAccount:
 
     def get_snapshot(self) -> AccountSnapshot:
         return self._snap
+
+
+class FakeResearchClient:
+    def __init__(self, proposal: ClaudeProposal) -> None:
+        self._proposal = proposal
+
+    def propose_equity_ideas(self, context: object, *, max_ideas: int) -> ClaudeProposal:
+        return self._proposal
+
+
+def research_advisor(proposal: ClaudeProposal | None = None) -> ResearchAdvisor:
+    return ResearchAdvisor(
+        FakeResearchClient(proposal or ClaudeProposal(summary="no long ideas")),  # type: ignore[arg-type]
+        ResearchConfig(enabled=True, require_approval_for_entry=True),
+    )
 
 
 class RecordingBroker:
@@ -608,6 +626,49 @@ class TestOrchestrator:
         result = orch.run_cycle(NOW)
         assert executor.closes == [SYMBOL]  # exits run even when market closed
         assert any(a.kind is ActionKind.SESSION_CLOSED for a in result.actions)
+
+    def test_opening_window_keeps_research_approval_when_scalp_disabled(
+        self, tmp_path: Path
+    ) -> None:
+        executor = FakeExecutor()
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=FakeStrategy(entry=signal()),
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot()),  # type: ignore[arg-type]
+            store=DailyStateStore(tmp_path / "s.json"),
+            limits=limits(),
+            symbols=(SYMBOL,),
+            asset_class="equities",
+            session_is_open=lambda _when: True,
+            research_advisor=research_advisor(),
+            clock=lambda: OPENING_WINDOW,
+        )
+        result = orch.run_cycle(OPENING_WINDOW)
+        assert any(a.kind is ActionKind.RESEARCH_NOT_APPROVED for a in result.actions)
+        assert executor.entries == []
+
+    def test_opening_scalp_can_skip_long_approval_when_enabled(
+        self, tmp_path: Path
+    ) -> None:
+        executor = FakeExecutor()
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=FakeStrategy(entry=signal()),
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot()),  # type: ignore[arg-type]
+            store=DailyStateStore(tmp_path / "s.json"),
+            limits=limits(),
+            symbols=(SYMBOL,),
+            asset_class="equities",
+            session_is_open=lambda _when: True,
+            opening_scalp_enabled=True,
+            research_advisor=research_advisor(),
+            clock=lambda: OPENING_WINDOW,
+        )
+        result = orch.run_cycle(OPENING_WINDOW)
+        assert result.entries_submitted == 1
+        assert len(executor.entries) == 1
 
     def test_real_execution_adapter_enforces_risk_gate(self, tmp_path: Path) -> None:
         # An open position in another symbol pushes open_positions to the max,

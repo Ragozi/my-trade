@@ -732,7 +732,11 @@ class TradingOrchestrator:
             )
             return actions
         # Fast open: deterministic signal + avoid veto only (no long-approval wait).
-        research_optional = self._opening_scalp_research_optional and in_opening_scalp
+        research_optional = (
+            self._opening_scalp_enabled
+            and self._opening_scalp_research_optional
+            and in_opening_scalp
+        )
 
         for symbol in self._active_symbols():
             sym = normalize_symbol(symbol)
