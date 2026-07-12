@@ -7,17 +7,19 @@ from datetime import UTC, datetime
 import pytest
 
 from my_trade.config import load_settings
+from my_trade.core.models import OrderSide
 from my_trade.core.monitoring.models import ActionKind
 from my_trade.core.monitoring.orchestrator import TradingOrchestrator
 from my_trade.core.monitoring.store import DailyStateStore
 from my_trade.core.risk import RiskLimits
 from my_trade.core.strategy.models import ScanEvaluation, Signal
-from my_trade.core.models import OrderSide
 from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
 from my_trade.research.client import MockClaudeResearchClient, extract_json_object
 from my_trade.research.context import build_research_context
 from my_trade.research.models import InstrumentType, TradeAction, TradeIdea
 from my_trade.research.rate_limit import ResearchRateLimiter
+
+RESEARCH_WINDOW = datetime(2026, 6, 18, 15, 0, tzinfo=UTC)
 
 
 class _StubAccount:
@@ -165,7 +167,7 @@ def test_orchestrator_logs_research_proposals() -> None:
         rate_limiter=ResearchRateLimiter(min_interval_seconds=0, max_calls_per_day=10),
     )
     orch = _orchestrator(advisor)
-    result = orch.run_cycle(datetime(2026, 6, 20, 15, 0, tzinfo=UTC))
+    result = orch.run_cycle(RESEARCH_WINDOW)
     kinds = {a.kind for a in result.actions}
     assert ActionKind.RESEARCH_PROPOSAL in kinds
     assert any(a.symbol == "AAPL" for a in result.actions)
@@ -214,8 +216,11 @@ def test_require_approval_blocks_unlisted_symbol(monkeypatch: pytest.MonkeyPatch
         session_is_open=lambda _now: True,
         research_advisor=advisor,
     )
-    result = orch.run_cycle(datetime(2026, 6, 20, 15, 0, tzinfo=UTC))
-    assert any(a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT" for a in result.actions)
+    result = orch.run_cycle(RESEARCH_WINDOW)
+    assert any(
+        a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT"
+        for a in result.actions
+    )
     assert not any(a.kind is ActionKind.ENTRY_SUBMITTED for a in result.actions)
 
 
