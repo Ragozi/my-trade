@@ -32,3 +32,12 @@ def test_large_cap_exclude_when_enabled() -> None:
     exclude = merged_exclude_set(exclude_large_caps=True)
     assert is_blocked_symbol("NVDA", exclude=exclude)
     assert not is_blocked_symbol("ABCD", exclude=exclude)
+
+
+def test_warrants_and_rights_blocked() -> None:
+    exclude = frozenset()
+    assert is_blocked_symbol("QTEXW", exclude=exclude)
+    assert is_blocked_symbol("VLN.WS", exclude=exclude)
+    assert is_blocked_symbol("ASPCR", exclude=exclude)
+    assert not is_blocked_symbol("MARA", exclude=exclude)
+    assert not is_blocked_symbol("WRAP", exclude=exclude)

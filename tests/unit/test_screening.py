@@ -208,8 +208,12 @@ class TestFilters:
         assert (
             passes(candidate("A", atr=0.02, dv=1000, chg=0.01, gap=0.05), crit) is True
         )
+        # Small pullback still OK; deep fade is not.
         assert (
-            passes(candidate("B", atr=0.02, dv=1000, chg=-0.01, gap=0.05), crit)
+            passes(candidate("B", atr=0.02, dv=1000, chg=-0.02, gap=0.05), crit) is True
+        )
+        assert (
+            passes(candidate("C", atr=0.02, dv=1000, chg=-0.06, gap=0.05), crit)
             is False
         )
 

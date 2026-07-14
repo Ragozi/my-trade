@@ -33,11 +33,12 @@ def passes(candidate: Candidate, criteria: ScreenerCriteria) -> bool:
         return False
     if candidate.gap_pct < criteria.min_gap_pct:
         return False
-    # Gap-and-go: overnight gap up AND still green on the lookback (premarket).
+    # Gap-and-go: overnight gap still open. Allow a small intraday pullback
+    # (common into the cash open) as long as the gap itself remains green.
     if criteria.require_premarket_up:
         if candidate.gap_pct <= 0:
             return False
-        if candidate.change_pct < 0:
+        if candidate.change_pct < -0.05:
             return False
     return criteria.min_atr_pct <= candidate.atr_pct <= criteria.max_atr_pct
 

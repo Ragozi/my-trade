@@ -235,48 +235,53 @@ def log_day_trade_banner(settings: Settings) -> None:
     """Make the effective universe/strategy mode obvious at startup."""
     sc = settings.screener
     st = settings.strategy
-    if sc.enabled and sc.movers_only:
+    if st.gap_scalp_mode or settings.runtime.opening_scalp_enabled:
         log.info(
-            "DAY-TRADE MODE | movers-only %s $%.0f–$%.0f | top_n=%d | "
-            "min_change=%.1f%% min_gap=%.1f%% premarket_up=%s | "
-            "am_refresh=%ds | gap_scalp=%s opening_window=%s | "
-            "momentum_vwap=%s vol_spike=%s | TP=%s SL=%.2f%% hold=%dm | "
-            "max_daily_entries=%d | static_fallback=%s | symbols=%s",
+            "GAP-SCALP MODE | movers-only %s $%.0f–$%.0f | top_n=%d | "
+            "min_gap=%.1f%% | opening_window=%s | TP=%s hold=%dm | "
+            "max_daily_entries=%d",
             sc.movers_source,
             sc.min_price,
             sc.max_price if sc.max_price != float("inf") else 0,
             sc.top_n,
-            sc.min_change_pct * 100,
             sc.min_gap_pct * 100,
-            sc.require_premarket_up,
-            sc.am_refresh_seconds,
-            st.gap_scalp_mode,
             (
                 f"9:30–{settings.runtime.opening_scalp_end_hour:02d}:"
                 f"{settings.runtime.opening_scalp_end_minute:02d}ET"
                 if settings.runtime.opening_scalp_enabled
                 else "all-session"
             ),
-            st.momentum_above_vwap,
-            st.require_volume_spike,
             (
                 f"${st.take_profit_dollars:.2f}"
                 if st.take_profit_dollars > 0
                 else f"{st.take_profit_pct * 100:.1f}%"
             ),
-            st.stop_loss_pct * 100,
             st.max_hold_minutes,
             settings.risk.max_daily_entries,
-            sc.fallback_to_static_symbols,
-            ",".join(settings.symbols) if settings.symbols else "(none)",
         )
     elif sc.enabled:
         log.info(
-            "SCREENER MODE | merge_seed=%s movers=%s top_n=%d | symbols=%s",
-            sc.merge_seed_with_movers,
-            sc.use_movers,
+            "WEEKLY SWING MODE | research+pullback | universe=%s top_n=%d | "
+            "price $%.0f–$%.0f | VWAP_pullback=%s rsi<=%.0f | "
+            "TP=%.1f%% SL=%.1f%% hold=%dm (~%.1fd) | "
+            "max_positions=%d max_daily_entries=%d | symbols=%s",
+            (
+                f"movers-only({sc.movers_source})"
+                if sc.movers_only
+                else f"seed+movers({sc.movers_source})" if sc.use_movers else "seed"
+            ),
             sc.top_n,
-            ",".join(settings.symbols) if settings.symbols else "(none)",
+            sc.min_price,
+            sc.max_price if sc.max_price != float("inf") else 0,
+            not st.momentum_above_vwap,
+            st.rsi_oversold,
+            st.take_profit_pct * 100,
+            st.stop_loss_pct * 100,
+            st.max_hold_minutes,
+            st.max_hold_minutes / (60 * 24),
+            settings.risk.max_concurrent_positions,
+            settings.risk.max_daily_entries,
+            ",".join(settings.symbols) if settings.symbols else "(dynamic)",
         )
     else:
         log.info(

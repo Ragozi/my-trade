@@ -79,9 +79,34 @@ def normalize_symbol_key(symbol: str) -> str:
     return symbol.strip().upper()
 
 
+def is_non_common_share(symbol: str) -> bool:
+    """True for warrants, rights, units, and similar non-common tickers.
+
+    Alpaca gainers lists are often dominated by these; they rarely have usable
+    IEX bars and are poor AM scalp candidates.
+    """
+    key = normalize_symbol_key(symbol)
+    if not key:
+        return True
+    if "." in key:  # e.g. VLN.WS, BRK.B preferred-style / warrant forms
+        suffix = key.rsplit(".", 1)[-1]
+        if suffix in {"WS", "W", "U", "R", "RT", "PW", "WT"}:
+            return True
+    # Common warrant/right/unit suffixes glued to the root ticker.
+    for suffix in ("WW", "WS", "WT", "RW", "RT"):
+        if key.endswith(suffix) and len(key) > len(suffix) + 1:
+            return True
+    if len(key) >= 5 and key[-1] in {"W", "U", "R"}:
+        # e.g. QTEXW, CELUW, AENTW, QSEAR, ASPCR — keep 4-letter roots like MARA.
+        return True
+    return False
+
+
 def is_blocked_symbol(symbol: str, *, exclude: frozenset[str]) -> bool:
     key = normalize_symbol_key(symbol)
     if not key:
+        return True
+    if is_non_common_share(key):
         return True
     return key in exclude
 

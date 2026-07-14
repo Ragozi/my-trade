@@ -18,11 +18,14 @@ import logging
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from my_trade.core.screening.symbol_filters import is_non_common_share
+
 _log = logging.getLogger("my_trade.data.alpaca_movers")
 
 
 def _excluded(symbol: str, exclude: frozenset[str]) -> bool:
-    return symbol.upper() in exclude
+    key = symbol.upper()
+    return key in exclude or is_non_common_share(key)
 
 
 def _dedup_cap(symbols: Iterable[str], top: int) -> list[str]:
@@ -130,7 +133,10 @@ class AlpacaMoversUniverse:
     def _fetch_movers(self) -> Sequence[str]:
         from alpaca.data.requests import MarketMoversRequest
 
-        resp = self._client.get_market_movers(MarketMoversRequest(top=self._top))
+        # Over-fetch then filter warrants/rights so ``top`` is usable commons.
+        # Alpaca market-movers caps ``top`` at 50.
+        fetch_top = min(50, max(self._top, 50))
+        resp = self._client.get_market_movers(MarketMoversRequest(top=fetch_top))
         return movers_symbols(
             getattr(resp, "gainers", []) or [],
             getattr(resp, "losers", []) or [],
