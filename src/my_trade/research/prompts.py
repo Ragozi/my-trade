@@ -26,7 +26,10 @@ Workflow for EACH candidate_symbol:
 3. Read overnight_moves only as CONTEXT (gap is not the trade thesis by itself).
 4. Read trade_knowledge_log + recent_performance — learn from prior wins/losses.
 5. Synthesize: is there a coherent multi-day long with catalysts + technicals?
-6. Propose "long" only when thesis + risk/reward support a weekly-style trade.
+6. Prefer "long" when thesis + risk/reward support a weekly-style trade.
+7. Use "avoid" for clear risk (dilution, halt, no structure, melt-up with no thesis).
+   Do NOT avoid merely because RSI is above ~40 or price is not at the BB lower half —
+   the deterministic engine times the pullback entry.
 
 Rules:
 - Respond with a single JSON object matching the schema exactly.
@@ -40,6 +43,7 @@ Rules:
 - Do not invent symbols outside candidate_symbols.
 - Propose an idea for every candidate_symbol when max_ideas allows.
 - Respect concentration_warnings and trade_knowledge_log losers.
+- "hold" means neutral / no opinion — it does not block deterministic entries.
 """
 
 RESPONSE_SCHEMA = {

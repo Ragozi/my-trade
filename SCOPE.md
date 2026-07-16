@@ -73,10 +73,11 @@ untrusted external input: schema-validated, bounded, and advisory.
   execution, monitoring orchestrator, screener, journal, paper runner, operator UI.
 - **Phase 4 research layer** is implemented in `src/my_trade/research/` (Claude client,
   advisor, memory/reflection, evaluation, portfolio-aware prompts). Advisory-only by
-  default; paper defaults use research approval for entries.
+  default; paper profile uses research as a veto (avoid blocks) rather than requiring
+  Claude to co-sign every long.
 - **Primary paper profile (2026-07):** weekly swing equities — Claude/research finds
-  catalysts; deterministic VWAP pullback enters; multi-day holds (~weekly wins) toward
-  monthly income. AM gap-scalp is disabled by default.
+  catalysts and vetoes junk; deterministic VWAP pullback enters; multi-day holds
+  (~weekly wins) toward monthly income. AM gap-scalp is disabled by default.
 - **Activation:** set `ASSET_CLASS=equities`, `ENABLE_CLAUDE=true`, and a valid
   `ANTHROPIC_API_KEY`. See `docs/PHASE4_ACTIVATION.md`.
 - Legacy flat modules (`strategy.py`, `main.py` at repo root) remain as reference;
