@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pandas as pd
+from scripts.paper_trade import Providers, run_health_checks
 
 from my_trade.config import load_settings
 from my_trade.core.monitoring.account import AccountSnapshot
-from scripts.paper_trade import Providers, run_health_checks
 
 
 class FakeData:
@@ -43,7 +43,10 @@ def test_health_check_uses_probe_symbol_for_movers_only_config() -> None:
     )
     data = FakeData()
 
-    ok = run_health_checks(settings, Providers(data=data, account=FakeAccount(), broker=FakeBroker()))
+    ok = run_health_checks(
+        settings,
+        Providers(data=data, account=FakeAccount(), broker=FakeBroker()),
+    )
 
     assert ok is True
     assert settings.symbols == ()
