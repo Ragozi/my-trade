@@ -52,23 +52,24 @@ from my_trade.core.screening import (  # noqa: E402
     StaticUniverseSource,
     UniverseSource,
 )
+from my_trade.core.screening.build import build_equities_universe  # noqa: E402
 from my_trade.core.strategy import PullbackStrategy, StrategyParams  # noqa: E402
 from my_trade.data import MarketDataProvider  # noqa: E402
 from my_trade.data.alpaca_data import AlpacaDataProvider  # noqa: E402
-from my_trade.core.screening.build import build_equities_universe  # noqa: E402
 from my_trade.data.stock_data import StockHistoricalDataProvider  # noqa: E402
 from my_trade.observability import Journal  # noqa: E402
-from my_trade.research import (
+from my_trade.research import (  # noqa: E402
+    build_postmortem_client,
     build_research_advisor,
     build_research_evaluation,
     build_research_memory,
-    build_postmortem_client,
     build_trade_knowledge,
     research_is_active,
 )
 
 ALLOW_LIVE = False  # HARD GUARD — never flip this on in the paper runner.
 HEARTBEAT_EVERY_N_CYCLES = 10  # journal an equity pulse this often in the loop
+EQUITY_HEALTH_CHECK_SYMBOL = "AAPL"
 
 log = logging.getLogger("my_trade.paper")
 
@@ -422,11 +423,19 @@ def describe_risk_limits(limits: RiskLimits, *, trading_capital: float = 0.0) ->
     return lines
 
 
+def _health_check_symbol(settings: Settings) -> str:
+    if settings.symbols:
+        return settings.symbols[0]
+    if settings.is_equities:
+        return EQUITY_HEALTH_CHECK_SYMBOL
+    raise ValueError("at least one symbol is required for data health checks")
+
+
 def run_health_checks(settings: Settings, providers: Providers) -> bool:
     """Exercise all three Alpaca boundaries (read-only) + confirm risk limits."""
     log.info("=== Health checks (read-only; no orders placed) ===")
     ok = True
-    symbol = settings.symbols[0]
+    symbol = _health_check_symbol(settings)
 
     try:
         snap = providers.account.get_snapshot()
@@ -587,9 +596,8 @@ def run_once(settings: Settings) -> int:
 def log_cycle(result: CycleResult) -> None:
     flag = "HALTED" if result.halted else "ok"
     research_count = sum(1 for a in result.actions if a.kind in _RESEARCH_KINDS)
-    log.info(
-        "cycle %s | equity=$%.2f day_pnl=$%.2f peak=$%.2f open=%d [%s]"
-        + (" | claude_events=%d" % research_count if research_count else ""),
+    message = "cycle %s | equity=$%.2f day_pnl=$%.2f peak=$%.2f open=%d [%s]"
+    args: tuple[object, ...] = (
         result.timestamp.strftime("%H:%M:%S"),
         result.equity,
         result.day_pnl,
@@ -597,6 +605,10 @@ def log_cycle(result: CycleResult) -> None:
         result.open_positions,
         flag,
     )
+    if research_count:
+        message += " | claude_events=%d"
+        args = (*args, research_count)
+    log.info(message, *args)
     for action in result.actions:
         if action.kind in _RESEARCH_KINDS:
             log.info(
