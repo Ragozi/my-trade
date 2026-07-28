@@ -69,6 +69,7 @@ from my_trade.research import (
 
 ALLOW_LIVE = False  # HARD GUARD — never flip this on in the paper runner.
 HEARTBEAT_EVERY_N_CYCLES = 10  # journal an equity pulse this often in the loop
+EQUITY_HEALTH_CHECK_SYMBOL = "AAPL"
 
 log = logging.getLogger("my_trade.paper")
 
@@ -422,11 +423,19 @@ def describe_risk_limits(limits: RiskLimits, *, trading_capital: float = 0.0) ->
     return lines
 
 
+def _health_check_symbol(settings: Settings) -> str:
+    if settings.symbols:
+        return settings.symbols[0]
+    if settings.is_equities:
+        return EQUITY_HEALTH_CHECK_SYMBOL
+    raise ValueError("at least one symbol is required for data health checks")
+
+
 def run_health_checks(settings: Settings, providers: Providers) -> bool:
     """Exercise all three Alpaca boundaries (read-only) + confirm risk limits."""
     log.info("=== Health checks (read-only; no orders placed) ===")
     ok = True
-    symbol = settings.symbols[0]
+    symbol = _health_check_symbol(settings)
 
     try:
         snap = providers.account.get_snapshot()
