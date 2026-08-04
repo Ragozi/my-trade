@@ -34,6 +34,7 @@ class DailyState:
     entries_today: dict[str, int] = field(default_factory=dict)
     position_stops: dict[str, float] = field(default_factory=dict)
     entry_times: dict[str, str] = field(default_factory=dict)
+    pending_entry_ids: dict[str, str] = field(default_factory=dict)
     halt_lesson_logged: bool = False
     broker_sod_equity: float = 0.0
 
@@ -152,13 +153,47 @@ def record_entry(
     symbol: str,
     stop_price: float,
     entry_time: datetime,
+    client_order_id: str | None = None,
 ) -> DailyState:
     key = normalize_symbol(symbol)
+    pending = dict(state.pending_entry_ids)
+    if client_order_id:
+        pending[key] = client_order_id
     return replace(
         state,
         entries_today={**state.entries_today, key: state.entries_today.get(key, 0) + 1},
         position_stops={**state.position_stops, key: stop_price},
         entry_times={**state.entry_times, key: entry_time.isoformat()},
+        pending_entry_ids=pending,
+    )
+
+
+def mark_entry_observed(state: DailyState, symbol: str) -> DailyState:
+    key = normalize_symbol(symbol)
+    if key not in state.pending_entry_ids:
+        return state
+    pending = {k: v for k, v in state.pending_entry_ids.items() if k != key}
+    return replace(state, pending_entry_ids=pending)
+
+
+def release_unfilled_entry(state: DailyState, symbol: str) -> DailyState:
+    """Undo a provisional entry count for an order that never opened a position."""
+    key = normalize_symbol(symbol)
+    count = state.entries_today.get(key, 0)
+    entries = dict(state.entries_today)
+    if count <= 1:
+        entries.pop(key, None)
+    else:
+        entries[key] = count - 1
+    stops = {k: v for k, v in state.position_stops.items() if k != key}
+    times = {k: v for k, v in state.entry_times.items() if k != key}
+    pending = {k: v for k, v in state.pending_entry_ids.items() if k != key}
+    return replace(
+        state,
+        entries_today=entries,
+        position_stops=stops,
+        entry_times=times,
+        pending_entry_ids=pending,
     )
 
 

@@ -37,6 +37,9 @@ class DailyStateStore:
                     str(k): float(v) for k, v in raw.get("position_stops", {}).items()
                 },
                 entry_times={str(k): str(v) for k, v in raw.get("entry_times", {}).items()},
+                pending_entry_ids={
+                    str(k): str(v) for k, v in raw.get("pending_entry_ids", {}).items()
+                },
                 halt_lesson_logged=bool(raw.get("halt_lesson_logged", False)),
                 broker_sod_equity=float(raw.get("broker_sod_equity", 0.0)),
             )
@@ -52,6 +55,7 @@ class DailyStateStore:
             "entries_today": dict(state.entries_today),
             "position_stops": dict(state.position_stops),
             "entry_times": dict(state.entry_times),
+            "pending_entry_ids": dict(state.pending_entry_ids),
             "halt_lesson_logged": state.halt_lesson_logged,
             "broker_sod_equity": state.broker_sod_equity,
         }
