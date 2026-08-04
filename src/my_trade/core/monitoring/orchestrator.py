@@ -18,14 +18,14 @@ Safety invariants preserved here:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Protocol
 
 import pandas as pd
 
-from my_trade.core.execution import EntryIntent, ExecutionOutcome
+from my_trade.core.execution import EntryIntent, ExecutionOutcome, OrderResult
 from my_trade.core.risk import (
     RiskLimits,
     is_circuit_breaker_tripped,
@@ -42,8 +42,10 @@ from .state import (
     build_account_state,
     clear_position,
     entry_time_for,
+    mark_entry_observed,
     mark_halt_lesson_logged,
     record_entry,
+    release_unfilled_entry,
     rollover_if_new_day,
 )
 from .store import DailyStateStore
@@ -86,6 +88,8 @@ class Executor(Protocol):
     ) -> ExecutionOutcome: ...
 
     def close_position(self, symbol: str, *, now: datetime | None = None) -> ExecutionOutcome: ...
+
+    def reconcile(self, client_order_id: str) -> OrderResult | None: ...
 
 
 def _utcnow() -> datetime:
@@ -272,6 +276,12 @@ class TradingOrchestrator:
                 broker_sod_equity=snapshot.equity,
                 start_of_day_equity=self._trading_capital,
             )
+        observed_state = state
+        for pos in snapshot.positions:
+            observed_state = mark_entry_observed(observed_state, pos.symbol)
+        if observed_state != state:
+            state = observed_state
+            self._persist(state)
         account_state = build_account_state(
             snapshot,
             state,
@@ -413,6 +423,67 @@ class TradingOrchestrator:
                     CycleAction(ActionKind.EXIT_FAILED, pos.symbol, outcome.detail)
                 )
         return actions
+
+    def _reconcile_flat_recorded_entry(self, symbol: str) -> CycleAction | None:
+        """Clear stale provisional state for a submitted entry that never filled."""
+        sym = normalize_symbol(symbol)
+        pending_id = self._state.pending_entry_ids.get(sym)
+        if not pending_id:
+            self._persist(clear_position(self._state, sym))
+            self._log.info("reconciled stale position state for %s (broker flat)", sym)
+            return None
+
+        try:
+            order = self._execution.reconcile(pending_id)
+        except Exception as exc:
+            self._log.warning(
+                "could not reconcile pending entry %s for %s: %s",
+                pending_id,
+                symbol,
+                exc,
+            )
+            return CycleAction(
+                ActionKind.SKIP_OPEN_POSITION,
+                symbol,
+                f"entry order pending; reconciliation failed for {pending_id}",
+            )
+
+        if order is None:
+            self._persist(release_unfilled_entry(self._state, sym))
+            self._log.info(
+                "released unfilled entry budget for %s (order %s not found)",
+                sym,
+                pending_id,
+            )
+            return None
+        if order.is_filled:
+            self._persist(clear_position(mark_entry_observed(self._state, sym), sym))
+            self._log.info(
+                "reconciled filled entry state for %s (broker flat, order %s filled)",
+                sym,
+                pending_id,
+            )
+            return None
+        if order.status.is_open:
+            return CycleAction(
+                ActionKind.SKIP_OPEN_POSITION,
+                symbol,
+                f"entry order still pending: {order.status.value}",
+            )
+        if order.status.is_terminal:
+            self._persist(release_unfilled_entry(self._state, sym))
+            self._log.info(
+                "released unfilled entry budget for %s (order %s %s)",
+                sym,
+                pending_id,
+                order.status.value,
+            )
+            return None
+        return CycleAction(
+            ActionKind.SKIP_OPEN_POSITION,
+            symbol,
+            f"entry order status unknown: {order.status.value}",
+        )
 
     def _learn_from_broker_closes(
         self, snapshot: AccountSnapshot, when: datetime
@@ -706,7 +777,10 @@ class TradingOrchestrator:
                 CycleAction(
                     ActionKind.SKIP_MAX_ENTRIES,
                     "",
-                    f"daily_entries={self._state.total_entries_today()} max={self._max_daily_entries}",
+                    (
+                        f"daily_entries={self._state.total_entries_today()} "
+                        f"max={self._max_daily_entries}"
+                    ),
                 )
             )
             return actions
@@ -737,10 +811,10 @@ class TradingOrchestrator:
         for symbol in self._active_symbols():
             sym = normalize_symbol(symbol)
             if sym not in open_symbols and sym in self._state.position_stops:
-                self._persist(clear_position(self._state, sym))
-                self._log.info(
-                    "reconciled stale position state for %s (broker flat)", sym
-                )
+                stale_action = self._reconcile_flat_recorded_entry(symbol)
+                if stale_action is not None:
+                    actions.append(stale_action)
+                    continue
             if sym in open_symbols:
                 actions.append(CycleAction(ActionKind.SKIP_OPEN_POSITION, symbol))
                 continue
@@ -781,11 +855,14 @@ class TradingOrchestrator:
                         veto = self._research.entry_veto_reason(
                             symbol, proposal, sticky_idea=sticky
                         )
-                if veto is None and not research_optional:
-                    if not self._research.allows_entry(
+                if (
+                    veto is None
+                    and not research_optional
+                    and not self._research.allows_entry(
                         symbol, proposal, sticky_idea=sticky
-                    ):
-                        veto = "research blocked entry"
+                    )
+                ):
+                    veto = "research blocked entry"
                 if veto is not None:
                     actions.append(
                         CycleAction(ActionKind.RESEARCH_NOT_APPROVED, symbol, veto)
@@ -809,7 +886,16 @@ class TradingOrchestrator:
                 EntryIntent.from_signal(signal), account_state, now=when
             )
             if outcome.submitted:
-                self._persist(record_entry(self._state, symbol, signal.stop_price, when))
+                state = record_entry(
+                    self._state,
+                    symbol,
+                    signal.stop_price,
+                    when,
+                    client_order_id=outcome.client_order_id,
+                )
+                if outcome.order is not None and outcome.order.is_filled:
+                    state = mark_entry_observed(state, symbol)
+                self._persist(state)
                 open_symbols.add(sym)
                 account_state = replace(
                     account_state,

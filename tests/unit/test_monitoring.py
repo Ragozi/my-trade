@@ -123,8 +123,14 @@ class FakeStrategy:
 
 
 class FakeExecutor:
-    def __init__(self, submitted: bool = True) -> None:
+    def __init__(
+        self,
+        submitted: bool = True,
+        *,
+        pending_statuses: dict[str, OrderStatus] | None = None,
+    ) -> None:
         self._submitted = submitted
+        self._pending_statuses = pending_statuses or {}
         self.entries: list[EntryIntent] = []
         self.closes: list[str] = []
 
@@ -139,6 +145,10 @@ class FakeExecutor:
             submitted=self._submitted,
             detail="" if self._submitted else "risk rejected: max_positions",
         )
+
+    def reconcile(self, client_order_id: str) -> OrderResult | None:
+        status = self._pending_statuses.get(client_order_id, OrderStatus.FILLED)
+        return OrderResult(client_order_id=client_order_id, status=status)
 
     def close_position(self, symbol: str, *, now: datetime | None = None) -> ExecutionOutcome:
         self.closes.append(symbol)
@@ -523,6 +533,55 @@ class TestOrchestrator:
         result = second.run_cycle(NOW)
         assert any(a.kind is ActionKind.SKIP_MAX_ENTRIES for a in result.actions)
         assert second_exec.entries == []  # no double entry after restart
+
+    def test_canceled_entry_submission_releases_entry_budget(self, tmp_path: Path) -> None:
+        executor = FakeExecutor(
+            submitted=True,
+            pending_statuses={"cid": OrderStatus.CANCELED},
+        )
+        orch = make_orchestrator(
+            tmp_path,
+            snap=snapshot(),
+            strategy=FakeStrategy(entry=signal()),
+            executor=executor,
+            max_entries=1,
+        )
+
+        first = orch.run_cycle(NOW)
+        assert first.entries_submitted == 1
+        assert orch.state.entries_for(SYMBOL) == 1
+        assert orch.state.pending_entry_ids[KEY] == "cid"
+
+        second = orch.run_cycle(NOW)
+
+        assert second.entries_submitted == 1
+        assert len(executor.entries) == 2
+        assert orch.state.entries_for(SYMBOL) == 1
+        assert orch.state.pending_entry_ids[KEY] == "cid"
+
+    def test_pending_entry_submission_blocks_duplicate_order(self, tmp_path: Path) -> None:
+        executor = FakeExecutor(
+            submitted=True,
+            pending_statuses={"cid": OrderStatus.ACCEPTED},
+        )
+        orch = make_orchestrator(
+            tmp_path,
+            snap=snapshot(),
+            strategy=FakeStrategy(entry=signal()),
+            executor=executor,
+            max_entries=2,
+        )
+
+        orch.run_cycle(NOW)
+        result = orch.run_cycle(NOW)
+
+        assert len(executor.entries) == 1
+        assert any(
+            a.kind is ActionKind.SKIP_OPEN_POSITION
+            and "still pending" in a.detail
+            for a in result.actions
+        )
+        assert orch.state.entries_for(SYMBOL) == 1
 
     def test_account_error_is_fail_safe(self, tmp_path: Path) -> None:
         class BrokenAccount:
