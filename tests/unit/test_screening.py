@@ -194,22 +194,51 @@ class TestFilters:
         # Premarket: flat intraday change but a real overnight gap.
         crit = ScreenerCriteria(min_change_pct=0.02, min_gap_pct=0.0)
         assert (
-            passes(candidate("A", atr=0.02, dv=1000, chg=0.0, gap=0.05), crit) is True
+            passes(
+                candidate("A", atr=0.02, dv=1000, chg=0.0, gap=0.05, prior=100.0),
+                crit,
+            )
+            is True
         )
 
     def test_rejects_below_min_gap(self) -> None:
         crit = ScreenerCriteria(min_gap_pct=0.03)
         assert (
-            passes(candidate("A", atr=0.02, dv=1000, chg=0.10, gap=0.01), crit) is False
+            passes(
+                candidate("A", atr=0.02, dv=1000, chg=0.10, gap=0.01, prior=100.0),
+                crit,
+            )
+            is False
+        )
+
+    def test_unknown_gap_falls_back_to_intraday_momentum(self) -> None:
+        crit = ScreenerCriteria(
+            min_change_pct=0.02,
+            min_gap_pct=0.03,
+            require_premarket_up=True,
+        )
+        assert (
+            passes(
+                candidate("A", atr=0.02, dv=1000, chg=0.05, gap=0.0, prior=0.0),
+                crit,
+            )
+            is True
         )
 
     def test_require_premarket_up(self) -> None:
         crit = ScreenerCriteria(require_premarket_up=True, min_gap_pct=0.02)
         assert (
-            passes(candidate("A", atr=0.02, dv=1000, chg=0.01, gap=0.05), crit) is True
+            passes(
+                candidate("A", atr=0.02, dv=1000, chg=0.01, gap=0.05, prior=100.0),
+                crit,
+            )
+            is True
         )
         assert (
-            passes(candidate("B", atr=0.02, dv=1000, chg=-0.01, gap=0.05), crit)
+            passes(
+                candidate("B", atr=0.02, dv=1000, chg=-0.01, gap=0.05, prior=100.0),
+                crit,
+            )
             is False
         )
 
