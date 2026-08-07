@@ -26,16 +26,17 @@ def passes(candidate: Candidate, criteria: ScreenerCriteria) -> bool:
         return False
     if candidate.dollar_volume < criteria.min_dollar_volume:
         return False
+    gap_known = candidate.prior_close > 0
     # Premarket: intraday lookback change can be flat while the overnight gap
     # is the real move — accept either signal for the momentum floor.
-    momentum = max(candidate.change_pct, candidate.gap_pct)
+    momentum = max(candidate.change_pct, candidate.gap_pct if gap_known else 0.0)
     if momentum < criteria.min_change_pct:
         return False
-    if candidate.gap_pct < criteria.min_gap_pct:
+    if gap_known and candidate.gap_pct < criteria.min_gap_pct:
         return False
     # Gap-and-go: overnight gap up AND still green on the lookback (premarket).
     if criteria.require_premarket_up:
-        if candidate.gap_pct <= 0:
+        if gap_known and candidate.gap_pct <= 0:
             return False
         if candidate.change_pct < 0:
             return False
