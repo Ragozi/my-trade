@@ -118,5 +118,10 @@ def is_stale(
     if df.empty:
         return True
     last_ts: datetime = pd.Timestamp(df.index[-1]).to_pydatetime()
-    lag_seconds = (now - last_ts).total_seconds()
+    compare_now = now
+    if compare_now.tzinfo is not None and last_ts.tzinfo is None:
+        last_ts = last_ts.replace(tzinfo=compare_now.tzinfo)
+    elif compare_now.tzinfo is None and last_ts.tzinfo is not None:
+        compare_now = compare_now.replace(tzinfo=last_ts.tzinfo)
+    lag_seconds = (compare_now - last_ts).total_seconds()
     return lag_seconds > timeframe_seconds * max_lag_bars

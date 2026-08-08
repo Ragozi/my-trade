@@ -7,7 +7,7 @@ Trading math (indicators/risk) is already tested elsewhere and is faked here.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -82,7 +82,16 @@ def snapshot(equity: float = 12_000.0, positions: tuple[Position, ...] = ()) -> 
 # --------------------------------------------------------------------------- #
 class FakeData:
     def get_bars(self, symbol: str, timeframe: str, limit: int | None = None) -> pd.DataFrame:
-        return pd.DataFrame()
+        return pd.DataFrame(
+            {
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.0],
+                "volume": [1_000.0],
+            },
+            index=pd.DatetimeIndex([NOW]),
+        )
 
     def get_latest_price(self, symbol: str) -> float | None:
         return None
@@ -363,6 +372,42 @@ class TestOrchestrator:
         result = orch.run_cycle(NOW)
         assert any(a.kind is ActionKind.NO_SIGNAL for a in result.actions)
         assert executor.entries == []
+
+    def test_stale_entry_data_skips_before_strategy_and_order(self, tmp_path: Path) -> None:
+        class StaleData(FakeData):
+            def get_bars(
+                self, symbol: str, timeframe: str, limit: int | None = None
+            ) -> pd.DataFrame:
+                return pd.DataFrame(
+                    {
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.0],
+                        "volume": [1_000.0],
+                    },
+                    index=pd.DatetimeIndex([NOW - timedelta(days=1)]),
+                )
+
+        strategy = FakeStrategy(entry=signal())
+        executor = FakeExecutor()
+        orch = TradingOrchestrator(
+            data=StaleData(),  # type: ignore[arg-type]
+            strategy=strategy,
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot()),  # type: ignore[arg-type]
+            store=DailyStateStore(tmp_path / "daily_state.json"),
+            limits=limits(),
+            symbols=(SYMBOL,),
+            clock=lambda: NOW,
+        )
+        result = orch.run_cycle(NOW)
+        assert strategy.entry_calls == 0
+        assert executor.entries == []
+        assert any(
+            a.kind is ActionKind.NO_SIGNAL and "stale 1Min" in a.detail
+            for a in result.actions
+        )
 
     def test_circuit_breaker_halts_entries(self, tmp_path: Path) -> None:
         store = DailyStateStore(tmp_path / "daily_state.json")
