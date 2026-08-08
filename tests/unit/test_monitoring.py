@@ -515,6 +515,52 @@ class TestOrchestrator:
         assert executor.closes == [SYMBOL]
         assert KEY not in orch.state.position_stops
 
+    def test_stale_exit_data_skips_soft_exit_and_close(self, tmp_path: Path) -> None:
+        class StaleData(FakeData):
+            def get_bars(
+                self, symbol: str, timeframe: str, limit: int | None = None
+            ) -> pd.DataFrame:
+                return pd.DataFrame(
+                    {
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.0],
+                        "volume": [1_000.0],
+                    },
+                    index=pd.DatetimeIndex([NOW - timedelta(days=1)]),
+                )
+
+        store = DailyStateStore(tmp_path / "daily_state.json")
+        store.save(
+            record_entry(
+                DailyState(
+                    trading_day=TODAY, start_of_day_equity=12_000.0, peak_equity=12_000.0
+                ),
+                SYMBOL,
+                99_350.0,
+                NOW,
+            )
+        )
+        strategy = FakeStrategy(exit_reason="take_profit")
+        executor = FakeExecutor()
+        pos = (Position(SYMBOL, qty=0.5, avg_entry_price=100_000.0),)
+        orch = TradingOrchestrator(
+            data=StaleData(),  # type: ignore[arg-type]
+            strategy=strategy,
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot(positions=pos)),  # type: ignore[arg-type]
+            store=store,
+            limits=limits(),
+            symbols=(SYMBOL,),
+            clock=lambda: NOW,
+        )
+        result = orch.run_cycle(NOW)
+        assert result.exits_submitted == 0
+        assert strategy.exit_calls == 0
+        assert executor.closes == []
+        assert KEY in orch.state.position_stops
+
     def test_max_entries_skips(self, tmp_path: Path) -> None:
         store = DailyStateStore(tmp_path / "daily_state.json")
         store.save(

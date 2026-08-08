@@ -370,6 +370,24 @@ class TradingOrchestrator:
         actions: list[CycleAction] = []
         for pos in snapshot.positions:
             bars = self._get_bars(pos.symbol, self._entry_tf)
+            try:
+                exit_data_stale = is_stale(
+                    bars,
+                    when,
+                    timeframe_to_seconds(self._entry_tf),
+                )
+            except Exception as exc:
+                self._log.warning(
+                    "exit data freshness check failed for %s: %s", pos.symbol, exc
+                )
+                continue
+            if exit_data_stale:
+                self._log.warning(
+                    "stale %s exit data for %s; skipping soft exit scan",
+                    self._entry_tf,
+                    pos.symbol,
+                )
+                continue
             entry_time = entry_time_for(self._state, pos.symbol) or when
             reason = self._strategy.detect_exit(
                 bars, entry_time, pos.avg_entry_price, when
