@@ -179,7 +179,16 @@ def test_orchestrator_blocks_entry_on_research_hold() -> None:
         def get_bars(self, symbol, timeframe, limit=None):  # type: ignore[no-untyped-def]
             import pandas as pd
 
-            return pd.DataFrame()
+            return pd.DataFrame(
+                {
+                    "open": [100.0],
+                    "high": [101.0],
+                    "low": [99.0],
+                    "close": [100.0],
+                    "volume": [1_000.0],
+                },
+                index=pd.DatetimeIndex([datetime(2026, 7, 1, 15, 0, tzinfo=UTC)]),
+            )
 
     class _SignalStrategy:
         def detect_entry(self, symbol, df_1m, df_5m, df_15m, now=None):  # type: ignore[no-untyped-def]
@@ -249,7 +258,16 @@ def test_orchestrator_blocks_sticky_avoid_when_research_skipped() -> None:
         def get_bars(self, symbol, timeframe, limit=None):  # type: ignore[no-untyped-def]
             import pandas as pd
 
-            return pd.DataFrame()
+            return pd.DataFrame(
+                {
+                    "open": [100.0],
+                    "high": [101.0],
+                    "low": [99.0],
+                    "close": [100.0],
+                    "volume": [1_000.0],
+                },
+                index=pd.DatetimeIndex([datetime(2026, 7, 1, 15, 0, tzinfo=UTC)]),
+            )
 
     class _SignalStrategy:
         def detect_entry(self, symbol, df_1m, df_5m, df_15m, now=None):  # type: ignore[no-untyped-def]
@@ -365,7 +383,16 @@ def test_orchestrator_submits_only_one_entry_per_cycle() -> None:
         def get_bars(self, symbol, timeframe, limit=None):  # type: ignore[no-untyped-def]
             import pandas as pd
 
-            return pd.DataFrame()
+            return pd.DataFrame(
+                {
+                    "open": [100.0],
+                    "high": [101.0],
+                    "low": [99.0],
+                    "close": [100.0],
+                    "volume": [1_000.0],
+                },
+                index=pd.DatetimeIndex([datetime(2026, 7, 1, 15, 0, tzinfo=UTC)]),
+            )
 
     class _SignalStrategy:
         def detect_entry(self, symbol, df_1m, df_5m, df_15m, now=None):  # type: ignore[no-untyped-def]

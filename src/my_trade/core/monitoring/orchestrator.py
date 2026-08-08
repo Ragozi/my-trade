@@ -768,6 +768,36 @@ class TradingOrchestrator:
                 )
                 continue
 
+            sticky = (
+                self._memory.stance_for_symbol(sym)
+                if self._memory is not None
+                else None
+            )
+            if self._research is not None and proposal is not None:
+                veto_kwargs: dict[str, object] = {"sticky_idea": sticky}
+                if research_optional:
+                    veto_kwargs["require_long_approval"] = False
+                veto = None
+                if hasattr(self._research, "entry_veto_reason"):
+                    try:
+                        veto = self._research.entry_veto_reason(
+                            symbol, proposal, **veto_kwargs
+                        )
+                    except TypeError:
+                        veto = self._research.entry_veto_reason(
+                            symbol, proposal, sticky_idea=sticky
+                        )
+                if veto is None and not research_optional:
+                    if not self._research.allows_entry(
+                        symbol, proposal, sticky_idea=sticky
+                    ):
+                        veto = "research blocked entry"
+                if veto is not None:
+                    actions.append(
+                        CycleAction(ActionKind.RESEARCH_NOT_APPROVED, symbol, veto)
+                    )
+                    continue
+
             entry_bars = self._get_bars(symbol, self._entry_tf)
             try:
                 entry_data_stale = is_stale(
@@ -801,36 +831,6 @@ class TradingOrchestrator:
                     )
                 )
                 continue
-
-            sticky = (
-                self._memory.stance_for_symbol(sym)
-                if self._memory is not None
-                else None
-            )
-            if self._research is not None and proposal is not None:
-                veto_kwargs: dict[str, object] = {"sticky_idea": sticky}
-                if research_optional:
-                    veto_kwargs["require_long_approval"] = False
-                veto = None
-                if hasattr(self._research, "entry_veto_reason"):
-                    try:
-                        veto = self._research.entry_veto_reason(
-                            symbol, proposal, **veto_kwargs
-                        )
-                    except TypeError:
-                        veto = self._research.entry_veto_reason(
-                            symbol, proposal, sticky_idea=sticky
-                        )
-                if veto is None and not research_optional:
-                    if not self._research.allows_entry(
-                        symbol, proposal, sticky_idea=sticky
-                    ):
-                        veto = "research blocked entry"
-                if veto is not None:
-                    actions.append(
-                        CycleAction(ActionKind.RESEARCH_NOT_APPROVED, symbol, veto)
-                    )
-                    continue
 
             signal, evaluation = self._strategy.detect_entry(
                 symbol,
