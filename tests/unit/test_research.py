@@ -170,7 +170,11 @@ def test_orchestrator_logs_research_proposals() -> None:
     client = MockClaudeResearchClient(ideas=(idea,))
     advisor = ResearchAdvisor(
         client,
-        ResearchConfig(enabled=True, require_approval_for_entry=False),
+        ResearchConfig(
+            enabled=True,
+            require_approval_for_entry=False,
+            market_hours_only=False,
+        ),
         rate_limiter=ResearchRateLimiter(min_interval_seconds=0, max_calls_per_day=10),
     )
     orch = _orchestrator(advisor)
@@ -191,7 +195,12 @@ def test_require_approval_blocks_unlisted_symbol(monkeypatch: pytest.MonkeyPatch
     client = MockClaudeResearchClient(ideas=(idea,))
     advisor = ResearchAdvisor(
         client,
-        ResearchConfig(enabled=True, require_approval_for_entry=True, min_confidence=0.5),
+        ResearchConfig(
+            enabled=True,
+            require_approval_for_entry=True,
+            min_confidence=0.5,
+            market_hours_only=False,
+        ),
         rate_limiter=ResearchRateLimiter(min_interval_seconds=0, max_calls_per_day=10),
     )
 
