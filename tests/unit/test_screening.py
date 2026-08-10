@@ -388,7 +388,16 @@ class TestScreener:
 # --------------------------------------------------------------------------- #
 class _OrchData:
     def get_bars(self, symbol: str, timeframe: str, limit: int | None = None) -> pd.DataFrame:
-        return pd.DataFrame()
+        return pd.DataFrame(
+            {
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.0],
+                "volume": [1_000.0],
+            },
+            index=pd.DatetimeIndex([NOW]),
+        )
 
     def get_latest_price(self, symbol: str) -> float | None:  # pragma: no cover
         return None

@@ -57,7 +57,16 @@ class _StubData:
     def get_bars(self, symbol: str, timeframe: str, limit: int | None = None):  # type: ignore[no-untyped-def]
         import pandas as pd
 
-        return pd.DataFrame()
+        return pd.DataFrame(
+            {
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.0],
+                "volume": [1_000.0],
+            },
+            index=pd.DatetimeIndex([datetime(2026, 6, 20, 15, 0, tzinfo=UTC)]),
+        )
 
 
 class _StubStrategy:

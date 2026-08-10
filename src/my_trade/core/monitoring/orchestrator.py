@@ -32,7 +32,12 @@ from my_trade.core.risk import (
     is_daily_loss_limit_hit,
     is_daily_profit_target_hit,
 )
-from my_trade.data import MarketDataProvider, normalize_symbol
+from my_trade.data import (
+    MarketDataProvider,
+    is_stale,
+    normalize_symbol,
+    timeframe_to_seconds,
+)
 from my_trade.research.models import ClaudeProposal
 
 from .account import AccountProvider, AccountSnapshot, Position
@@ -365,6 +370,24 @@ class TradingOrchestrator:
         actions: list[CycleAction] = []
         for pos in snapshot.positions:
             bars = self._get_bars(pos.symbol, self._entry_tf)
+            try:
+                exit_data_stale = is_stale(
+                    bars,
+                    when,
+                    timeframe_to_seconds(self._entry_tf),
+                )
+            except Exception as exc:
+                self._log.warning(
+                    "exit data freshness check failed for %s: %s", pos.symbol, exc
+                )
+                continue
+            if exit_data_stale:
+                self._log.warning(
+                    "stale %s exit data for %s; skipping soft exit scan",
+                    self._entry_tf,
+                    pos.symbol,
+                )
+                continue
             entry_time = entry_time_for(self._state, pos.symbol) or when
             reason = self._strategy.detect_exit(
                 bars, entry_time, pos.avg_entry_price, when
@@ -762,6 +785,7 @@ class TradingOrchestrator:
                     )
                 )
                 continue
+
             sticky = (
                 self._memory.stance_for_symbol(sym)
                 if self._memory is not None
@@ -792,9 +816,43 @@ class TradingOrchestrator:
                     )
                     continue
 
+            entry_bars = self._get_bars(symbol, self._entry_tf)
+            try:
+                entry_data_stale = is_stale(
+                    entry_bars,
+                    when,
+                    timeframe_to_seconds(self._entry_tf),
+                )
+            except Exception as exc:
+                self._log.warning(
+                    "entry data freshness check failed for %s: %s", symbol, exc
+                )
+                actions.append(
+                    CycleAction(
+                        ActionKind.NO_SIGNAL,
+                        symbol,
+                        f"{self._entry_tf} data freshness check failed",
+                    )
+                )
+                continue
+            if entry_data_stale:
+                self._log.warning(
+                    "stale %s entry data for %s; skipping entry scan",
+                    self._entry_tf,
+                    symbol,
+                )
+                actions.append(
+                    CycleAction(
+                        ActionKind.NO_SIGNAL,
+                        symbol,
+                        f"stale {self._entry_tf} entry data",
+                    )
+                )
+                continue
+
             signal, evaluation = self._strategy.detect_entry(
                 symbol,
-                self._get_bars(symbol, self._entry_tf),
+                entry_bars,
                 self._get_bars(symbol, self._trend_tf),
                 self._get_bars(symbol, self._trend_tf_15m),
                 when,

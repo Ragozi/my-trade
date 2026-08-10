@@ -31,7 +31,16 @@ class _StubData:
     def get_bars(self, symbol: str, timeframe: str, limit: int | None = None):  # type: ignore[no-untyped-def]
         import pandas as pd
 
-        return pd.DataFrame()
+        return pd.DataFrame(
+            {
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.0],
+                "volume": [1_000.0],
+            },
+            index=pd.DatetimeIndex([datetime(2026, 6, 20, 15, 0, tzinfo=UTC)]),
+        )
 
 
 class _StubStrategy:
@@ -161,7 +170,11 @@ def test_orchestrator_logs_research_proposals() -> None:
     client = MockClaudeResearchClient(ideas=(idea,))
     advisor = ResearchAdvisor(
         client,
-        ResearchConfig(enabled=True, require_approval_for_entry=False),
+        ResearchConfig(
+            enabled=True,
+            require_approval_for_entry=False,
+            market_hours_only=False,
+        ),
         rate_limiter=ResearchRateLimiter(min_interval_seconds=0, max_calls_per_day=10),
     )
     orch = _orchestrator(advisor)
@@ -182,7 +195,12 @@ def test_require_approval_blocks_unlisted_symbol(monkeypatch: pytest.MonkeyPatch
     client = MockClaudeResearchClient(ideas=(idea,))
     advisor = ResearchAdvisor(
         client,
-        ResearchConfig(enabled=True, require_approval_for_entry=True, min_confidence=0.5),
+        ResearchConfig(
+            enabled=True,
+            require_approval_for_entry=True,
+            min_confidence=0.5,
+            market_hours_only=False,
+        ),
         rate_limiter=ResearchRateLimiter(min_interval_seconds=0, max_calls_per_day=10),
     )
 

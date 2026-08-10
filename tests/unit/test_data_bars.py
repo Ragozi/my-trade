@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -155,6 +155,12 @@ class TestStalenessAndMinBars:
         df = bars_to_frame(_records(3, start))  # last bar at 12:02
         now = start + timedelta(minutes=10)
         assert is_stale(df, now, timeframe_seconds=60, max_lag_bars=2) is True
+
+    def test_mixed_timezone_comparison_uses_now_timezone(self) -> None:
+        start = datetime(2026, 1, 1, 12, 0)
+        df = bars_to_frame(_records(3, start))  # naive index, last bar at 12:02
+        now = (start + timedelta(minutes=2, seconds=30)).replace(tzinfo=UTC)
+        assert is_stale(df, now, timeframe_seconds=60, max_lag_bars=2) is False
 
 
 class TestProviderProtocol:
