@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TextIO
 
 # Allow running without an editable install: put ``src`` on the path.
 _SRC = Path(__file__).resolve().parents[1] / "src"
@@ -614,8 +615,12 @@ def log_cycle(result: CycleResult) -> None:
             )
 
 
-def _acquire_instance_lock(log_dir: str) -> Path | None:
-    """Refuse to start if another paper runner holds the lock."""
+def _acquire_instance_lock(log_dir: str) -> TextIO | None:
+    """Refuse to start if another paper runner holds the lock.
+
+    The returned handle must stay open for as long as the bot is running; closing
+    it releases the OS-level advisory lock.
+    """
     lock_path = Path(log_dir) / "paper_bot.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115
@@ -641,7 +646,7 @@ def _acquire_instance_lock(log_dir: str) -> Path | None:
     handle.truncate()
     handle.write(str(os.getpid()))
     handle.flush()
-    return lock_path
+    return handle
 
 
 def run_loop(settings: Settings) -> int:
@@ -717,6 +722,7 @@ def run_loop(settings: Settings) -> int:
         log.info("Shutdown requested; exiting cleanly (open positions left intact).")
     finally:
         pid_path(settings.runtime.log_dir).unlink(missing_ok=True)
+        lock.close()
         journal.close()
     return 0
 
