@@ -646,7 +646,7 @@ def _acquire_instance_lock(log_dir: str) -> TextIO | None:
     handle.truncate()
     handle.write(str(os.getpid()))
     handle.flush()
-    return lock_path
+    return handle
 
 
 def run_loop(settings: Settings) -> int:
