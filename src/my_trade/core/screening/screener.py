@@ -28,6 +28,8 @@ from .metrics import build_candidate
 from .models import Candidate, ScreenerCriteria
 from .universe import UniverseSource
 
+_AM_WARMUP_BAR_LIMIT = 500
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -78,7 +80,9 @@ class Screener:
         candidates: list[Candidate] = []
         for symbol in self._universe.symbols():
             try:
-                bars = self._data.get_bars(symbol, self._timeframe, self._bar_limit)
+                bars = self._data.get_bars(
+                    symbol, self._timeframe, self._effective_bar_limit(now)
+                )
             except Exception as exc:  # fail safe: skip a bad symbol, keep screening
                 self._log.warning("screener: bars failed for %s: %s", symbol, exc)
                 continue
@@ -117,6 +121,14 @@ class Screener:
         if self._am_refresh_seconds > 0 and is_am_momentum_window(now):
             return self._am_refresh_seconds
         return self._refresh_seconds
+
+    def _effective_bar_limit(self, now: datetime) -> int:
+        if is_am_momentum_window(now):
+            # At the cash open, RTH-only equity feeds may have only a few bars
+            # today. Pull enough recent history for ATR/ranking without changing
+            # the entry-timeframe bars used by the strategy itself.
+            return max(self._bar_limit, _AM_WARMUP_BAR_LIMIT)
+        return self._bar_limit
 
     def _is_stale(self, now: datetime) -> bool:
         if self._last_run is None:

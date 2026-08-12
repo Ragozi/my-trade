@@ -314,9 +314,11 @@ class FakeCountingData:
         self._frames = frames
         self._raise_for = raise_for
         self.calls = 0
+        self.requests: list[tuple[str, str, int | None]] = []
 
     def get_bars(self, symbol: str, timeframe: str, limit: int | None = None) -> pd.DataFrame:
         self.calls += 1
+        self.requests.append((symbol, timeframe, limit))
         if symbol == self._raise_for:
             raise RuntimeError("boom")
         return self._frames.get(symbol, pd.DataFrame())
@@ -381,6 +383,40 @@ class TestScreener:
         symbols = {c.symbol for c in ranked}
         assert "BBB" not in symbols
         assert symbols == {"AAA", "CCC"}
+
+    def test_am_window_fetches_enough_history_for_opening_candidates(self) -> None:
+        class _WarmupData(FakeCountingData):
+            def get_bars(
+                self, symbol: str, timeframe: str, limit: int | None = None
+            ) -> pd.DataFrame:
+                self.calls += 1
+                self.requests.append((symbol, timeframe, limit))
+                if timeframe == "1Day":
+                    return pd.DataFrame(
+                        {"close": [9.0]},
+                        index=pd.DatetimeIndex(["2026-06-16"]),
+                    )
+                if limit is not None and limit >= 500:
+                    return make_frame(n=20, close=10.0, spread=0.4, volume=10_000)
+                return make_frame(n=1, close=10.0, spread=0.4, volume=10_000)
+
+        clock = [datetime(2026, 6, 17, 13, 30, tzinfo=UTC)]  # 09:30 ET
+        data = _WarmupData({})
+        screener = Screener(
+            data=data,  # type: ignore[arg-type]
+            universe=StaticUniverseSource(["AAA"]),
+            criteria=ScreenerCriteria(min_price=2, max_price=20, min_dollar_volume=1),
+            timeframe="5Min",
+            bar_limit=50,
+            atr_period=14,
+            lookback=20,
+            clock=lambda: clock[0],
+        )
+
+        ranked = screener.screen()
+
+        assert [c.symbol for c in ranked] == ["AAA"]
+        assert data.requests[0] == ("AAA", "5Min", 500)
 
 
 # --------------------------------------------------------------------------- #
