@@ -123,8 +123,16 @@ class FakeStrategy:
 
 
 class FakeExecutor:
-    def __init__(self, submitted: bool = True) -> None:
+    def __init__(
+        self,
+        submitted: bool = True,
+        *,
+        open_order_symbols: set[str] | None = None,
+    ) -> None:
         self._submitted = submitted
+        self._open_order_symbols = {
+            normalize_symbol(symbol) for symbol in (open_order_symbols or set())
+        }
         self.entries: list[EntryIntent] = []
         self.closes: list[str] = []
 
@@ -145,6 +153,9 @@ class FakeExecutor:
         return ExecutionOutcome(
             status=ExecutionStatus.SUBMITTED, client_order_id="cid", submitted=True
         )
+
+    def open_order_symbols(self) -> frozenset[str]:
+        return frozenset(self._open_order_symbols)
 
 
 class FakeAccount:
@@ -523,6 +534,29 @@ class TestOrchestrator:
         result = second.run_cycle(NOW)
         assert any(a.kind is ActionKind.SKIP_MAX_ENTRIES for a in result.actions)
         assert second_exec.entries == []  # no double entry after restart
+
+    def test_pending_flat_order_blocks_new_symbol_entry(self, tmp_path: Path) -> None:
+        executor = FakeExecutor(submitted=True, open_order_symbols={"ETH/USD"})
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=FakeStrategy(entry=signal()),
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot()),  # type: ignore[arg-type]
+            store=DailyStateStore(tmp_path / "s.json"),
+            limits=limits(max_concurrent_positions=1),
+            symbols=(SYMBOL,),
+            clock=lambda: NOW,
+        )
+
+        result = orch.run_cycle(NOW)
+
+        assert any(
+            a.kind is ActionKind.SKIP_OPEN_POSITION
+            and "pending broker order" in a.detail
+            and "ETHUSD" in a.detail
+            for a in result.actions
+        )
+        assert executor.entries == []
 
     def test_account_error_is_fail_safe(self, tmp_path: Path) -> None:
         class BrokenAccount:

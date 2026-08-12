@@ -99,6 +99,7 @@ class FakeBroker:
         return OrderResult(
             client_order_id=request.client_order_id,
             status=OrderStatus.ACCEPTED,
+            symbol=request.symbol,
             order_id="sim-order-1",
         )
 
@@ -367,6 +368,32 @@ class TestExecuteEntry:
         assert outcome.status is ExecutionStatus.SUBMITTED
         assert broker.cancelled == ["stop-1"]
         assert broker.closed == ["MSFT"]
+
+    def test_open_order_symbols_returns_working_symbols(self) -> None:
+        broker = FakeBroker(
+            open_orders=[
+                OrderResult(
+                    client_order_id="accepted",
+                    status=OrderStatus.ACCEPTED,
+                    order_id="open-1",
+                    symbol="AAPL",
+                ),
+                OrderResult(
+                    client_order_id="terminal",
+                    status=OrderStatus.CANCELED,
+                    order_id="done-1",
+                    symbol="MSFT",
+                ),
+                OrderResult(
+                    client_order_id="blank-symbol",
+                    status=OrderStatus.ACCEPTED,
+                    order_id="open-2",
+                    symbol="",
+                ),
+            ]
+        )
+
+        assert make_adapter(broker).open_order_symbols() == frozenset({"AAPL"})
 
     def test_close_position_waits_after_cancel(self) -> None:
         slept: list[float] = []

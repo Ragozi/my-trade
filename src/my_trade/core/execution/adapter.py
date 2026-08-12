@@ -238,3 +238,11 @@ class ExecutionAdapter:
     def reconcile(self, client_order_id: str) -> OrderResult | None:
         """Fetch the current broker state for a previously-submitted order."""
         return self._broker.get_order_by_client_id(client_order_id)
+
+    def open_order_symbols(self) -> frozenset[str]:
+        """Symbols with working broker orders, normalized for monitoring checks."""
+        return frozenset(
+            normalize_symbol(order.symbol)
+            for order in self._broker.list_open_orders()
+            if order.status.is_open and order.symbol
+        )
