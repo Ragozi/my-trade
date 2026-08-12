@@ -495,6 +495,19 @@ class TradingOrchestrator:
                 total += risk_per_share * pos.qty
         return total
 
+    def _flat_open_order_symbols(self, open_symbols: set[str]) -> frozenset[str]:
+        checker = getattr(self._execution, "open_order_symbols", None)
+        if checker is None:
+            return frozenset()
+        try:
+            symbols = {normalize_symbol(symbol) for symbol in checker()}
+        except Exception as exc:
+            self._log.warning("open order reconciliation failed: %s", exc)
+            # Broker order visibility is part of the entry safety gate. If it
+            # fails, keep any locally recorded flat entries protected.
+            symbols = set(self._state.position_stops)
+        return frozenset(symbol for symbol in symbols if symbol not in open_symbols)
+
     def _claude_long(self, symbol: str, proposal: ClaudeProposal | None) -> bool:
         if self._research is None or proposal is None or proposal.skipped:
             return False
@@ -733,6 +746,17 @@ class TradingOrchestrator:
             return actions
         # Fast open: deterministic signal + avoid veto only (no long-approval wait).
         research_optional = self._opening_scalp_research_optional and in_opening_scalp
+        flat_order_symbols = self._flat_open_order_symbols(open_symbols)
+        if flat_order_symbols:
+            actions.append(
+                CycleAction(
+                    ActionKind.SKIP_OPEN_POSITION,
+                    "",
+                    "pending broker order(s) for flat symbol(s): "
+                    + ",".join(sorted(flat_order_symbols)),
+                )
+            )
+            return actions
 
         for symbol in self._active_symbols():
             sym = normalize_symbol(symbol)
