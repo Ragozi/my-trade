@@ -76,7 +76,11 @@ def prior_session_close(daily: pd.DataFrame, *, as_of: date | None = None) -> fl
     frame = daily
     if as_of is not None and isinstance(frame.index, pd.DatetimeIndex):
         # Compare calendar dates in the index timezone (or naive).
-        idx_dates = frame.index.tz_localize(None).date if frame.index.tz is not None else frame.index.date
+        idx_dates = (
+            frame.index.tz_localize(None).date
+            if frame.index.tz is not None
+            else frame.index.date
+        )
         mask = [d < as_of for d in idx_dates]
         frame = frame.loc[mask]
     if frame.empty:

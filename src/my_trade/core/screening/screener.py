@@ -19,10 +19,9 @@ import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
+from my_trade.core.market_calendar import is_am_momentum_window
 from my_trade.data import MarketDataProvider
 from my_trade.data.bars import is_stale, timeframe_to_seconds
-
-from my_trade.core.market_calendar import is_am_momentum_window
 
 from .filters import rank
 from .metrics import build_candidate
