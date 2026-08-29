@@ -20,7 +20,7 @@ from typing import Any
 import pandas as pd
 
 from .alpaca_data import alpaca_timeframe, compute_start, frame_from_barset
-from .bars import empty_frame
+from .bars import empty_frame, symbols_match
 
 _log = logging.getLogger("my_trade.data.alpaca_stock")
 
@@ -87,7 +87,33 @@ class StockHistoricalDataProvider:
         return frame_from_barset(barset, symbol, fill_zero_volume=False)
 
     def get_latest_price(self, symbol: str) -> float | None:
-        frame = self.get_bars(symbol, "1Min", limit=5)
-        if frame.empty:
+        try:
+            from alpaca.data.requests import StockLatestTradeRequest
+
+            request = StockLatestTradeRequest(
+                symbol_or_symbols=symbol,
+                feed=self._data_feed(),
+            )
+            latest = self._client.get_stock_latest_trade(request)
+        except Exception as exc:  # boundary: degrade to "no current price"
+            _log.warning("get_latest_price failed for %s: %s", symbol, exc)
             return None
-        return float(frame.iloc[-1]["close"])
+
+        trade: Any
+        if isinstance(latest, dict):
+            trade = latest.get(symbol)
+            if trade is None:
+                trade = next(
+                    (value for key, value in latest.items() if symbols_match(str(key), symbol)),
+                    None,
+                )
+        else:
+            trade = latest
+        if trade is None:
+            return None
+        price = trade.get("price") if isinstance(trade, dict) else getattr(trade, "price", None)
+        try:
+            value = float(price)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None

@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from my_trade.core.monitoring import (
     AccountSnapshot,
@@ -310,19 +311,28 @@ class TestUniverse:
 class FakeCountingData:
     """MarketDataProvider that serves per-symbol frames and counts calls."""
 
-    def __init__(self, frames: dict[str, pd.DataFrame], *, raise_for: str | None = None) -> None:
+    def __init__(
+        self,
+        frames: dict[str, pd.DataFrame],
+        *,
+        raise_for: str | None = None,
+        latest_prices: dict[str, float] | None = None,
+    ) -> None:
         self._frames = frames
         self._raise_for = raise_for
+        self._latest_prices = latest_prices or {}
         self.calls = 0
+        self.latest_calls = 0
 
     def get_bars(self, symbol: str, timeframe: str, limit: int | None = None) -> pd.DataFrame:
         self.calls += 1
         if symbol == self._raise_for:
             raise RuntimeError("boom")
-        return self._frames.get(symbol, pd.DataFrame())
+        return self._frames.get(f"{symbol}:{timeframe}", self._frames.get(symbol, pd.DataFrame()))
 
-    def get_latest_price(self, symbol: str) -> float | None:  # pragma: no cover - unused
-        return None
+    def get_latest_price(self, symbol: str) -> float | None:
+        self.latest_calls += 1
+        return self._latest_prices.get(symbol)
 
 
 class TestScreener:
@@ -381,6 +391,44 @@ class TestScreener:
         symbols = {c.symbol for c in ranked}
         assert "BBB" not in symbols
         assert symbols == {"AAA", "CCC"}
+
+    def test_stale_intraday_bars_use_latest_price_for_gap_gate(self) -> None:
+        now = datetime(2026, 6, 18, 12, 30, tzinfo=UTC)
+        stale_bars = make_frame(close=100.0)
+        stale_bars.index = pd.date_range(
+            end=now - timedelta(days=1),
+            periods=len(stale_bars),
+            freq="5min",
+            tz=UTC,
+        )
+        daily = pd.DataFrame(
+            {"close": [100.0]},
+            index=pd.DatetimeIndex(["2026-06-17"]),
+        )
+        data = FakeCountingData(
+            {"AAA:5Min": stale_bars, "AAA:1Day": daily},
+            latest_prices={"AAA": 106.0},
+        )
+        screener = Screener(
+            data=data,  # type: ignore[arg-type]
+            universe=StaticUniverseSource(["AAA"]),
+            criteria=ScreenerCriteria(
+                min_bars=10,
+                min_change_pct=0.015,
+                min_gap_pct=0.03,
+                require_premarket_up=True,
+            ),
+            timeframe="5Min",
+            clock=lambda: now,
+        )
+
+        ranked = screener.screen()
+
+        assert data.latest_calls == 1
+        assert len(ranked) == 1
+        assert ranked[0].symbol == "AAA"
+        assert ranked[0].last_price == pytest.approx(106.0)
+        assert ranked[0].gap_pct == pytest.approx(0.06)
 
 
 # --------------------------------------------------------------------------- #

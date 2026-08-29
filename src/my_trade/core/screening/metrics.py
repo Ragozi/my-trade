@@ -100,6 +100,8 @@ def build_candidate(
     lookback: int = 20,
     daily: pd.DataFrame | None = None,
     as_of: date | None = None,
+    last_price_override: float | None = None,
+    change_pct_override: float | None = None,
 ) -> Candidate | None:
     """Summarize a symbol's recent bars into a :class:`Candidate`.
 
@@ -111,14 +113,24 @@ def build_candidate(
     pct = atr_pct(df, atr_period)
     if pct is None:
         return None
-    last_price = float(df["close"].iloc[-1])
+    frame_last_price = float(df["close"].iloc[-1])
+    last_price = (
+        float(last_price_override)
+        if last_price_override is not None and last_price_override > 0
+        else frame_last_price
+    )
+    change = (
+        float(change_pct_override)
+        if change_pct_override is not None
+        else change_pct(df, lookback)
+    )
     prior = prior_session_close(daily, as_of=as_of) if daily is not None else None
     return Candidate(
         symbol=symbol,
         last_price=last_price,
         dollar_volume=avg_dollar_volume(df, lookback),
         atr_pct=pct,
-        change_pct=change_pct(df, lookback),
+        change_pct=change,
         bars=len(df),
         gap_pct=gap_pct(last_price, prior),
         prior_close=float(prior or 0.0),
