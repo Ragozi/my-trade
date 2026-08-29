@@ -19,6 +19,8 @@ import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
+import pandas as pd
+
 from my_trade.core.market_calendar import is_am_momentum_window
 from my_trade.data import MarketDataProvider
 from my_trade.data.bars import is_stale, timeframe_to_seconds
@@ -71,10 +73,10 @@ class Screener:
         """The most recent ranked candidates (with scores), for observability."""
         return list(self._ranked)
 
-    def _bars_are_stale(self, bars: object, now: datetime) -> bool:
+    def _bars_are_stale(self, bars: pd.DataFrame, now: datetime) -> bool:
         try:
             return is_stale(
-                bars,  # type: ignore[arg-type]
+                bars,
                 now,
                 timeframe_to_seconds(self._timeframe),
             )

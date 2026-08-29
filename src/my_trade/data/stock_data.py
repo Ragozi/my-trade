@@ -112,6 +112,8 @@ class StockHistoricalDataProvider:
         if trade is None:
             return None
         price = trade.get("price") if isinstance(trade, dict) else getattr(trade, "price", None)
+        if price is None:
+            return None
         try:
             value = float(price)
         except (TypeError, ValueError):
