@@ -19,9 +19,11 @@ import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
-from my_trade.data import MarketDataProvider
+import pandas as pd
 
 from my_trade.core.market_calendar import is_am_momentum_window
+from my_trade.data import MarketDataProvider
+from my_trade.data.bars import is_stale, timeframe_to_seconds
 
 from .filters import rank
 from .metrics import build_candidate
@@ -71,6 +73,26 @@ class Screener:
         """The most recent ranked candidates (with scores), for observability."""
         return list(self._ranked)
 
+    def _bars_are_stale(self, bars: pd.DataFrame, now: datetime) -> bool:
+        try:
+            return is_stale(
+                bars,
+                now,
+                timeframe_to_seconds(self._timeframe),
+            )
+        except (TypeError, ValueError):
+            return False
+
+    def _latest_price(self, symbol: str) -> float | None:
+        try:
+            latest = self._data.get_latest_price(symbol)
+        except Exception as exc:  # fail safe: bad latest quote skips only this symbol
+            self._log.debug("screener: latest price failed for %s: %s", symbol, exc)
+            return None
+        if latest is None or latest <= 0:
+            return None
+        return float(latest)
+
     def screen(self) -> list[Candidate]:
         """Run a full screening pass now and return ranked candidates."""
         now = self._clock()
@@ -87,6 +109,20 @@ class Screener:
                 daily = self._data.get_bars(symbol, "1Day", 10)
             except Exception as exc:
                 self._log.debug("screener: daily bars failed for %s: %s", symbol, exc)
+            last_price_override = None
+            change_override = None
+            if self._bars_are_stale(bars, now):
+                last_price_override = self._latest_price(symbol)
+                if last_price_override is None:
+                    self._log.debug(
+                        "screener: stale %s bars and no latest price for %s",
+                        self._timeframe,
+                        symbol,
+                    )
+                    continue
+                # Historical bars can still provide ATR/liquidity, but not
+                # premarket continuation; avoid reusing yesterday's tape.
+                change_override = 0.0
             candidate = build_candidate(
                 symbol,
                 bars,
@@ -94,6 +130,8 @@ class Screener:
                 lookback=self._lookback,
                 daily=daily,
                 as_of=as_of,
+                last_price_override=last_price_override,
+                change_pct_override=change_override,
             )
             if candidate is not None:
                 candidates.append(candidate)
