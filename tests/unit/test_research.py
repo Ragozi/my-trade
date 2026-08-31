@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 import pytest
 
 from my_trade.config import load_settings
+from my_trade.core.models import OrderSide
 from my_trade.core.monitoring.models import ActionKind
 from my_trade.core.monitoring.orchestrator import TradingOrchestrator
 from my_trade.core.monitoring.store import DailyStateStore
 from my_trade.core.risk import RiskLimits
 from my_trade.core.strategy.models import ScanEvaluation, Signal
-from my_trade.core.models import OrderSide
 from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
 from my_trade.research.client import MockClaudeResearchClient, extract_json_object
 from my_trade.research.context import build_research_context
@@ -32,6 +32,15 @@ class _StubData:
         import pandas as pd
 
         return pd.DataFrame()
+
+
+class _CountingData(_StubData):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_bars(self, symbol: str, timeframe: str, limit: int | None = None):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        return super().get_bars(symbol, timeframe, limit)
 
 
 class _StubStrategy:
@@ -96,6 +105,38 @@ def test_billing_failure_sets_extended_cooldown() -> None:
     limiter.record_billing_failure(t0, cooldown_seconds=3600)
     assert limiter.can_call(t0) is False
     assert "billing cooldown" in limiter.skip_reason(t0)
+
+
+def test_orchestrator_skips_context_fetches_when_research_rate_limited() -> None:
+    import tempfile
+    from pathlib import Path
+
+    now = datetime(2026, 6, 17, 14, 0, tzinfo=UTC)
+    limiter = ResearchRateLimiter(min_interval_seconds=900, max_calls_per_day=10)
+    limiter.record_call(now)
+    client = MockClaudeResearchClient()
+    advisor = ResearchAdvisor(
+        client,
+        ResearchConfig(enabled=True, require_approval_for_entry=False),
+        rate_limiter=limiter,
+    )
+    data = _CountingData()
+    orch = TradingOrchestrator(
+        data=data,
+        strategy=_StubStrategy(),
+        execution=_StubExecution(),
+        account=_StubAccount(),
+        store=DailyStateStore(Path(tempfile.mkdtemp()) / "daily.json"),
+        limits=RiskLimits(),
+        symbols=("AAPL",),
+        asset_class="equities",
+        session_is_open=lambda _now: False,
+        research_advisor=advisor,
+    )
+    result = orch.run_cycle(now)
+    assert client.call_count == 0
+    assert data.calls == 0
+    assert any(a.kind is ActionKind.SESSION_CLOSED for a in result.actions)
 
 
 def test_advisor_skipped_when_disabled() -> None:
@@ -215,7 +256,10 @@ def test_require_approval_blocks_unlisted_symbol(monkeypatch: pytest.MonkeyPatch
         research_advisor=advisor,
     )
     result = orch.run_cycle(datetime(2026, 6, 20, 15, 0, tzinfo=UTC))
-    assert any(a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT" for a in result.actions)
+    assert any(
+        a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "MSFT"
+        for a in result.actions
+    )
     assert not any(a.kind is ActionKind.ENTRY_SUBMITTED for a in result.actions)
 
 
