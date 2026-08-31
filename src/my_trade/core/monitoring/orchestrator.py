@@ -18,8 +18,8 @@ Safety invariants preserved here:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -33,7 +33,7 @@ from my_trade.core.risk import (
     is_daily_profit_target_hit,
 )
 from my_trade.data import MarketDataProvider, normalize_symbol
-from my_trade.research.models import ClaudeProposal
+from my_trade.research.models import ClaudeProposal, ClosedTradeReflection
 
 from .account import AccountProvider, AccountSnapshot, Position
 from .models import ActionKind, CycleAction, CycleResult, HaltReason
@@ -517,21 +517,42 @@ class TradingOrchestrator:
                     self._research.config.equities_only,
                 )
             return [], None
+        session_open = True
+        if self._session_is_open is not None:
+            session_open = self._session_is_open(when)
         if self._research.config.market_hours_only:
             from my_trade.core.market_calendar import is_equity_research_window
 
-            # Premarket (8:30 ET+) is allowed so the watchlist/research warm up
+            # Early premarket (4:00 ET+) is allowed so watchlist/research warm up
             # before cash open; overnight/weekend still skipped.
-            if not is_equity_research_window(when):
+            if not is_equity_research_window(when) and not session_open:
                 self._log.debug(
                     "research skipped (outside research window, market_hours_only=true)"
                 )
-                return [], None
+                return [], ClaudeProposal(
+                    skipped=True,
+                    skip_reason="outside research window",
+                )
+        skip_reason = (
+            self._research.skip_reason(when)
+            if hasattr(self._research, "skip_reason")
+            else ""
+        )
+        if skip_reason:
+            self._log.info("research skipped (preflight): %s", skip_reason)
+            skip_actions: list[CycleAction] = []
+            if not skip_reason.startswith("rate limited (") and not skip_reason.startswith(
+                "daily budget exhausted"
+            ):
+                skip_actions.append(
+                    CycleAction(ActionKind.RESEARCH_SKIPPED, detail=skip_reason)
+                )
+            return skip_actions, ClaudeProposal(skipped=True, skip_reason=skip_reason)
         candidates = self._active_symbols()
         if not candidates:
             return [], None
         sym_set = frozenset(normalize_symbol(s) for s in candidates)
-        recent_reflections = ()
+        recent_reflections: tuple[ClosedTradeReflection, ...] = ()
         performance = None
         if self._memory is not None:
             if self._journal_path:
@@ -583,10 +604,6 @@ class TradingOrchestrator:
                 api_secret=self._news_api_secret,
                 as_of=when,
             )
-
-        session_open = True
-        if self._session_is_open is not None:
-            session_open = self._session_is_open(when)
 
         ranked_meta: dict[str, dict[str, float]] = {}
         if self._screener_ranked is not None:
@@ -701,12 +718,21 @@ class TradingOrchestrator:
             if isinstance(research_proposal, ClaudeProposal)
             else None
         )
+        research = (
+            self._research
+            if self._research is not None
+            and self._research.is_active_for(self._asset_class)
+            else None
+        )
         if self._state.total_entries_today() >= self._max_daily_entries:
             actions.append(
                 CycleAction(
                     ActionKind.SKIP_MAX_ENTRIES,
                     "",
-                    f"daily_entries={self._state.total_entries_today()} max={self._max_daily_entries}",
+                    (
+                        f"daily_entries={self._state.total_entries_today()} "
+                        f"max={self._max_daily_entries}"
+                    ),
                 )
             )
             return actions
@@ -767,25 +793,33 @@ class TradingOrchestrator:
                 if self._memory is not None
                 else None
             )
-            if self._research is not None and proposal is not None:
-                veto_kwargs: dict[str, object] = {"sticky_idea": sticky}
-                if research_optional:
-                    veto_kwargs["require_long_approval"] = False
+            if research is not None:
                 veto = None
-                if hasattr(self._research, "entry_veto_reason"):
+                if hasattr(research, "entry_veto_reason"):
                     try:
-                        veto = self._research.entry_veto_reason(
-                            symbol, proposal, **veto_kwargs
-                        )
+                        if research_optional:
+                            veto = research.entry_veto_reason(
+                                symbol,
+                                proposal,
+                                sticky_idea=sticky,
+                                require_long_approval=False,
+                            )
+                        else:
+                            veto = research.entry_veto_reason(
+                                symbol, proposal, sticky_idea=sticky
+                            )
                     except TypeError:
-                        veto = self._research.entry_veto_reason(
+                        veto = research.entry_veto_reason(
                             symbol, proposal, sticky_idea=sticky
                         )
-                if veto is None and not research_optional:
-                    if not self._research.allows_entry(
+                if (
+                    veto is None
+                    and not research_optional
+                    and not research.allows_entry(
                         symbol, proposal, sticky_idea=sticky
-                    ):
-                        veto = "research blocked entry"
+                    )
+                ):
+                    veto = "research blocked entry"
                 if veto is not None:
                     actions.append(
                         CycleAction(ActionKind.RESEARCH_NOT_APPROVED, symbol, veto)

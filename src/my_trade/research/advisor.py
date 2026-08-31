@@ -49,9 +49,13 @@ class ResearchAdvisor:
     def is_active_for(self, asset_class: str) -> bool:
         if not self._config.enabled:
             return False
-        if self._config.equities_only and asset_class != "equities":
-            return False
-        return True
+        return not (self._config.equities_only and asset_class != "equities")
+
+    def skip_reason(self, when: datetime) -> str:
+        """Cheap preflight reason a research API call would be skipped."""
+        if not self._config.enabled:
+            return "disabled"
+        return self._limiter.skip_reason(when)
 
     def propose(
         self,
@@ -89,7 +93,12 @@ class ResearchAdvisor:
             return ResearchResult(proposal=proposal, called_api=True)
         except Exception as exc:
             msg = str(exc)
-            if "credit balance" in msg.lower() or "billing" in msg.lower() or "insufficient_quota" in msg.lower():
+            lower_msg = msg.lower()
+            if (
+                "credit balance" in lower_msg
+                or "billing" in lower_msg
+                or "insufficient_quota" in lower_msg
+            ):
                 self._limiter.record_billing_failure(
                     when, cooldown_seconds=self._config.billing_cooldown_seconds
                 )
@@ -116,7 +125,7 @@ class ResearchAdvisor:
     def allows_entry(
         self,
         symbol: str,
-        proposal: ClaudeProposal,
+        proposal: ClaudeProposal | None,
         *,
         sticky_idea: TradeIdea | None = None,
         require_long_approval: bool | None = None,
@@ -143,7 +152,7 @@ class ResearchAdvisor:
     def entry_veto_reason(
         self,
         symbol: str,
-        proposal: ClaudeProposal,
+        proposal: ClaudeProposal | None,
         *,
         sticky_idea: TradeIdea | None = None,
         require_long_approval: bool | None = None,

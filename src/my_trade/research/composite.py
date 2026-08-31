@@ -46,6 +46,18 @@ class CompositeResearchAdvisor:
         # both: claude → premium → workhorse (insertion order from factory)
         return self._tiers
 
+    def skip_reason(self, when: datetime) -> str:
+        """Return a skip reason only when every eligible tier is rate-limited."""
+        if not self._config.enabled:
+            return "disabled"
+        last_reason = ""
+        for _name, advisor in self._ordered_tiers():
+            reason = advisor.skip_reason(when)
+            if not reason:
+                return ""
+            last_reason = reason
+        return last_reason or "no research tiers configured"
+
     def propose(
         self,
         context: object,
@@ -100,7 +112,7 @@ class CompositeResearchAdvisor:
     def allows_entry(
         self,
         symbol: str,
-        proposal: ClaudeProposal,
+        proposal: ClaudeProposal | None,
         *,
         sticky_idea: TradeIdea | None = None,
         require_long_approval: bool | None = None,
@@ -126,7 +138,7 @@ class CompositeResearchAdvisor:
     def entry_veto_reason(
         self,
         symbol: str,
-        proposal: ClaudeProposal,
+        proposal: ClaudeProposal | None,
         *,
         sticky_idea: TradeIdea | None = None,
         require_long_approval: bool | None = None,
