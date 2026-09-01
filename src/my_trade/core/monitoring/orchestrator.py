@@ -18,8 +18,8 @@ Safety invariants preserved here:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -314,8 +314,9 @@ class TradingOrchestrator:
         # (3) Claude research (advisory) — runs even when the session is closed so
         # proposals and memory keep updating; entries remain session-gated below.
         open_symbols = {normalize_symbol(p.symbol) for p in snapshot.positions}
+        active_symbols = self._active_symbols()
         research_actions, research_proposal = self._run_research(
-            snapshot, account_state, when, open_symbols
+            snapshot, account_state, when, open_symbols, active_symbols
         )
         actions.extend(research_actions)
 
@@ -323,10 +324,9 @@ class TradingOrchestrator:
         # (exits above still run; bracket legs remain live at the broker).
         # Premarket: still refresh the screener watchlist so the open is warm.
         if self._session_is_open is not None and not self._session_is_open(when):
-            watchlist = self._active_symbols()
             self._log.info(
                 "market closed; skipping new entries this cycle (watchlist=%s)",
-                ",".join(watchlist) if watchlist else "(empty)",
+                ",".join(active_symbols) if active_symbols else "(empty)",
             )
             actions.append(CycleAction(ActionKind.SESSION_CLOSED))
             return CycleResult(
@@ -340,7 +340,13 @@ class TradingOrchestrator:
 
         # (5) Entries.
         actions.extend(
-            self._scan_entries(open_symbols, account_state, when, research_proposal)
+            self._scan_entries(
+                open_symbols,
+                account_state,
+                when,
+                research_proposal,
+                active_symbols=active_symbols,
+            )
         )
 
         return CycleResult(
@@ -506,6 +512,7 @@ class TradingOrchestrator:
         account_state: AccountState,
         when: datetime,
         open_symbols: set[str],
+        candidates: tuple[str, ...],
     ) -> tuple[list[CycleAction], object | None]:
         if self._research is None or not self._research.is_active_for(self._asset_class):
             if self._research is not None and not self._research.is_active_for(
@@ -527,7 +534,6 @@ class TradingOrchestrator:
                     "research skipped (outside research window, market_hours_only=true)"
                 )
                 return [], None
-        candidates = self._active_symbols()
         if not candidates:
             return [], None
         sym_set = frozenset(normalize_symbol(s) for s in candidates)
@@ -693,6 +699,8 @@ class TradingOrchestrator:
         account_state: AccountState,
         when: datetime,
         research_proposal: object | None = None,
+        *,
+        active_symbols: tuple[str, ...] | None = None,
     ) -> list[CycleAction]:
         actions: list[CycleAction] = []
         strategy_signals: dict[str, bool] = {}
@@ -706,7 +714,10 @@ class TradingOrchestrator:
                 CycleAction(
                     ActionKind.SKIP_MAX_ENTRIES,
                     "",
-                    f"daily_entries={self._state.total_entries_today()} max={self._max_daily_entries}",
+                    (
+                        f"daily_entries={self._state.total_entries_today()} "
+                        f"max={self._max_daily_entries}"
+                    ),
                 )
             )
             return actions
@@ -734,7 +745,8 @@ class TradingOrchestrator:
         # Fast open: deterministic signal + avoid veto only (no long-approval wait).
         research_optional = self._opening_scalp_research_optional and in_opening_scalp
 
-        for symbol in self._active_symbols():
+        scan_symbols = active_symbols if active_symbols is not None else self._active_symbols()
+        for symbol in scan_symbols:
             sym = normalize_symbol(symbol)
             if sym not in open_symbols and sym in self._state.position_stops:
                 self._persist(clear_position(self._state, sym))
@@ -781,11 +793,10 @@ class TradingOrchestrator:
                         veto = self._research.entry_veto_reason(
                             symbol, proposal, sticky_idea=sticky
                         )
-                if veto is None and not research_optional:
-                    if not self._research.allows_entry(
-                        symbol, proposal, sticky_idea=sticky
-                    ):
-                        veto = "research blocked entry"
+                if veto is None and not research_optional and not self._research.allows_entry(
+                    symbol, proposal, sticky_idea=sticky
+                ):
+                    veto = "research blocked entry"
                 if veto is not None:
                     actions.append(
                         CycleAction(ActionKind.RESEARCH_NOT_APPROVED, symbol, veto)
@@ -854,7 +865,7 @@ class TradingOrchestrator:
             min_conf = self._research.config.min_confidence if self._research else 0.55
             self._evaluation.record_cycle(
                 when=when,
-                symbols=self._active_symbols(),
+                symbols=scan_symbols,
                 proposal=proposal,
                 strategy_signals=strategy_signals,
                 min_confidence=min_conf,
