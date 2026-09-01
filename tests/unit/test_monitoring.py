@@ -580,6 +580,88 @@ class TestOrchestrator:
         assert any(a.kind is ActionKind.SESSION_CLOSED for a in result.actions)
         assert executor.entries == []
 
+    def test_cycle_reuses_research_watchlist_for_entry_scan(self, tmp_path: Path) -> None:
+        from my_trade.research.advisor import ResearchConfig
+        from my_trade.research.models import ClaudeProposal, ResearchResult
+
+        when = datetime(2026, 6, 18, 13, 35, tzinfo=UTC)  # 09:35 ET
+        watchlist_calls = 0
+
+        def changing_watchlist() -> tuple[str, ...]:
+            nonlocal watchlist_calls
+            watchlist_calls += 1
+            return ("AAPL",) if watchlist_calls == 1 else ("MSFT",)
+
+        class SymbolStrategy(FakeStrategy):
+            def detect_entry(
+                self,
+                symbol: str,
+                df_1m: pd.DataFrame,
+                df_5m: pd.DataFrame,
+                df_15m: pd.DataFrame,
+                now: datetime | None = None,
+            ) -> tuple[Signal | None, ScanEvaluation]:
+                self.entry_calls += 1
+                return signal(symbol=symbol), ScanEvaluation(
+                    eligible=True, summary="fake", near_signal=False
+                )
+
+        class RecordingAdvisor:
+            config = ResearchConfig(
+                enabled=True,
+                require_approval_for_entry=True,
+                market_hours_only=True,
+            )
+
+            def __init__(self) -> None:
+                self.candidates: tuple[str, ...] = ()
+
+            def is_active_for(self, asset_class: str) -> bool:
+                return asset_class == "equities"
+
+            def propose(self, context, *, when):  # type: ignore[no-untyped-def]
+                self.candidates = context.candidate_symbols
+                return ResearchResult(
+                    proposal=ClaudeProposal(summary="opening scan", model="mock"),
+                    called_api=True,
+                )
+
+            def entry_veto_reason(
+                self,
+                symbol,
+                proposal,
+                *,
+                sticky_idea=None,
+                require_long_approval=None,
+            ):  # type: ignore[no-untyped-def]
+                return None
+
+        advisor = RecordingAdvisor()
+        executor = FakeExecutor()
+        orch = TradingOrchestrator(
+            data=FakeData(),  # type: ignore[arg-type]
+            strategy=SymbolStrategy(),
+            execution=executor,  # type: ignore[arg-type]
+            account=FakeAccount(snapshot()),  # type: ignore[arg-type]
+            store=DailyStateStore(tmp_path / "s.json"),
+            limits=limits(),
+            symbols=("AAPL", "MSFT"),
+            watchlist=changing_watchlist,
+            asset_class="equities",
+            session_is_open=lambda _when: True,
+            opening_scalp_enabled=True,
+            opening_scalp_research_optional=True,
+            research_advisor=advisor,  # type: ignore[arg-type]
+            clock=lambda: when,
+        )
+
+        result = orch.run_cycle(when)
+
+        assert advisor.candidates == ("AAPL",)
+        assert watchlist_calls == 1
+        assert result.entries_submitted == 1
+        assert [entry.symbol for entry in executor.entries] == ["AAPL"]
+
     def test_session_closed_still_manages_exits(self, tmp_path: Path) -> None:
         store = DailyStateStore(tmp_path / "daily_state.json")
         store.save(
