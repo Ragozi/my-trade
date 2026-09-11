@@ -53,7 +53,8 @@ class RiskSettings:
     max_risk_per_trade_pct: float = 0.02      # R1
     max_total_open_risk_pct: float = 0.07     # R2
     daily_loss_limit_pct: float = 0.05        # R3
-    daily_profit_target_pct: float = 0.0       # optional R+ : halt entries when day goal hit (0=off)
+    # Optional R+: halt entries when the day goal is hit (0 = off).
+    daily_profit_target_pct: float = 0.0
     max_drawdown_pct: float = 0.15            # R4
     max_concurrent_positions: int = 1
     max_entries_per_symbol_per_day: int = 10
@@ -225,6 +226,26 @@ class RuntimeSettings:
     # During the opening scalp window, skip require-long-approval (still honor avoid).
     opening_scalp_research_optional: bool = True
 
+    def validate(self) -> None:
+        if not 0 <= self.opening_scalp_end_hour <= 23:
+            raise ValueError(
+                "OPENING_SCALP_END_HOUR must be in [0, 23], "
+                f"got {self.opening_scalp_end_hour}"
+            )
+        if not 0 <= self.opening_scalp_end_minute <= 59:
+            raise ValueError(
+                "OPENING_SCALP_END_MINUTE must be in [0, 59], "
+                f"got {self.opening_scalp_end_minute}"
+            )
+        if self.opening_scalp_enabled and (
+            self.opening_scalp_end_hour,
+            self.opening_scalp_end_minute,
+        ) <= (9, 30):
+            raise ValueError(
+                "OPENING_SCALP_END_HOUR/MINUTE must be after 09:30 ET when "
+                "OPENING_SCALP_ENABLED=true"
+            )
+
 
 @dataclass(frozen=True)
 class WorkhorseSettings:
@@ -328,6 +349,7 @@ class Settings:
     def validate(self) -> None:
         """Always-on structural validation (safe even outside trading)."""
         self.risk.validate()
+        self.runtime.validate()
         if self.asset_class not in VALID_ASSET_CLASSES:
             raise ValueError(
                 f"ASSET_CLASS must be one of {VALID_ASSET_CLASSES}, got {self.asset_class!r}"

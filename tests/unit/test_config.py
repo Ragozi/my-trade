@@ -195,6 +195,37 @@ class TestAssetClass:
         with pytest.raises(ValueError):
             load_settings(env={"ASSET_CLASS": "forex"})
 
+    @pytest.mark.parametrize(
+        ("key", "value", "message"),
+        [
+            ("OPENING_SCALP_END_HOUR", "24", "OPENING_SCALP_END_HOUR"),
+            ("OPENING_SCALP_END_HOUR", "-1", "OPENING_SCALP_END_HOUR"),
+            ("OPENING_SCALP_END_MINUTE", "60", "OPENING_SCALP_END_MINUTE"),
+            ("OPENING_SCALP_END_MINUTE", "-1", "OPENING_SCALP_END_MINUTE"),
+        ],
+    )
+    def test_opening_scalp_end_time_range_fails_fast(
+        self, key: str, value: str, message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            load_settings(env={key: value})
+
+    @pytest.mark.parametrize(
+        ("hour", "minute"),
+        [("9", "30"), ("9", "0"), ("8", "59")],
+    )
+    def test_enabled_opening_scalp_requires_window_after_cash_open(
+        self, hour: str, minute: str
+    ) -> None:
+        with pytest.raises(ValueError, match="after 09:30 ET"):
+            load_settings(
+                env={
+                    "OPENING_SCALP_ENABLED": "true",
+                    "OPENING_SCALP_END_HOUR": hour,
+                    "OPENING_SCALP_END_MINUTE": minute,
+                }
+            )
+
     def test_screener_movers_settings_loaded(self) -> None:
         env = {
             "USE_SCREENER": "true",
