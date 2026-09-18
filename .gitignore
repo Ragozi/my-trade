@@ -1,29 +1,14 @@
+﻿# Local secrets — never commit
 .env
 .venv/
-venv/
 __pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-logs/
-*.log
-daily_state.json
-logs/bot.pid
-logs/bot_status.json
-logs/paper.log
-logs/last_universe.json
+*.pyc
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
-.coverage.*
 htmlcov/
+logs/
+dist/
+node_modules/
 .DS_Store
-Thumbs.db
-
-# Lovable / Vite frontend
-frontend/node_modules/
-frontend/dist/
-frontend/.env
-frontend/.env.local
