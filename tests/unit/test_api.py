@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from datetime import date
 
+from fastapi.middleware.cors import CORSMiddleware
+
+from my_trade.api.app import _browser_write_allowed, create_app
 from my_trade.api.env_patch import merge_env_lines, patch_to_env_updates, resolve_symbol_key
 from my_trade.api.serializers import stats_from_events
 from my_trade.config import load_settings
@@ -36,6 +39,26 @@ class TestEnvPatch:
         out = merge_env_lines(text, {"ASSET_CLASS": "equities"})
         assert "ASSET_CLASS=equities" in out
         assert "PAPER_TRADING=true" in out
+
+
+class TestOperatorApiOriginProtection:
+    def test_cross_origin_bot_write_is_rejected(self) -> None:
+        assert not _browser_write_allowed("POST", "https://evil.example", None)
+
+    def test_loopback_origin_bot_write_is_allowed(self) -> None:
+        assert _browser_write_allowed("POST", "http://localhost:8080", None)
+
+    def test_local_non_browser_bot_write_is_allowed(self) -> None:
+        assert _browser_write_allowed("POST", None, None)
+
+    def test_cross_origin_referer_write_is_rejected_without_origin(self) -> None:
+        assert not _browser_write_allowed("POST", None, "https://evil.example/form")
+
+    def test_cors_does_not_allow_wildcard_origins(self) -> None:
+        cors = next(m for m in create_app().user_middleware if m.cls is CORSMiddleware)
+
+        assert cors.kwargs["allow_origins"] == []
+        assert cors.kwargs["allow_origin_regex"].startswith("^https?://")
 
 
 class TestSerializers:
