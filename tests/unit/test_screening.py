@@ -420,7 +420,11 @@ class _OrchExec:
 
 
 def _orchestrator(
-    tmp_path: Path, strategy: _OrchStrategy, watchlist: object
+    tmp_path: Path,
+    strategy: _OrchStrategy,
+    watchlist: object,
+    *,
+    watchlist_fallback_to_static: bool = True,
 ) -> TradingOrchestrator:
     snap = AccountSnapshot(equity=12_000.0, cash=12_000.0, last_equity=12_000.0, positions=())
     return TradingOrchestrator(
@@ -435,6 +439,7 @@ def _orchestrator(
         ),
         symbols=("BTC/USD",),
         watchlist=watchlist,  # type: ignore[arg-type]
+        watchlist_fallback_to_static=watchlist_fallback_to_static,
         clock=lambda: NOW,
     )
 
@@ -463,6 +468,25 @@ class TestOrchestratorWatchlist:
         orch = _orchestrator(tmp_path, strategy, boom)
         orch.run_cycle(NOW)
         assert strategy.scanned == ["BTC/USD"]  # fell back to configured symbols
+
+    def test_watchlist_error_without_static_fallback_scans_no_symbols(
+        self, tmp_path: Path
+    ) -> None:
+        strategy = _OrchStrategy()
+
+        def boom() -> list[str]:
+            raise RuntimeError("screener down")
+
+        orch = _orchestrator(
+            tmp_path,
+            strategy,
+            boom,
+            watchlist_fallback_to_static=False,
+        )
+        result = orch.run_cycle(NOW)
+
+        assert strategy.scanned == []
+        assert not any(a.kind is ActionKind.NO_SIGNAL for a in result.actions)
 
     def test_empty_watchlist_falls_back_to_static_symbols(self, tmp_path: Path) -> None:
         strategy = _OrchStrategy()
