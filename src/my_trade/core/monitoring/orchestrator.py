@@ -18,8 +18,8 @@ Safety invariants preserved here:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -203,15 +203,20 @@ class TradingOrchestrator:
     def _active_symbols(self) -> tuple[str, ...]:
         """Symbols to scan this cycle.
 
-        When a dynamic ``watchlist`` (e.g. the screener) is configured we use it,
-        but fail safe to the statically configured symbols if it errors or is
-        empty — the screener narrowing the universe must never *halt* trading.
+        When a dynamic ``watchlist`` (e.g. the screener) is configured we use it.
+        If fallback is enabled, a failed or empty watchlist degrades to the
+        static symbols; otherwise it yields no entry candidates.
         """
         if self._watchlist is None:
             return self._symbols
         try:
             selected = tuple(self._watchlist())
         except Exception as exc:
+            if not self._watchlist_fallback_to_static:
+                self._log.warning(
+                    "watchlist failed; no static fallback configured: %s", exc
+                )
+                return ()
             self._log.warning("watchlist failed, using static symbols: %s", exc)
             return self._symbols
         if not selected:
@@ -702,11 +707,15 @@ class TradingOrchestrator:
             else None
         )
         if self._state.total_entries_today() >= self._max_daily_entries:
+            detail = (
+                f"daily_entries={self._state.total_entries_today()} "
+                f"max={self._max_daily_entries}"
+            )
             actions.append(
                 CycleAction(
                     ActionKind.SKIP_MAX_ENTRIES,
                     "",
-                    f"daily_entries={self._state.total_entries_today()} max={self._max_daily_entries}",
+                    detail,
                 )
             )
             return actions
@@ -781,11 +790,14 @@ class TradingOrchestrator:
                         veto = self._research.entry_veto_reason(
                             symbol, proposal, sticky_idea=sticky
                         )
-                if veto is None and not research_optional:
-                    if not self._research.allows_entry(
+                if (
+                    veto is None
+                    and not research_optional
+                    and not self._research.allows_entry(
                         symbol, proposal, sticky_idea=sticky
-                    ):
-                        veto = "research blocked entry"
+                    )
+                ):
+                    veto = "research blocked entry"
                 if veto is not None:
                     actions.append(
                         CycleAction(ActionKind.RESEARCH_NOT_APPROVED, symbol, veto)
