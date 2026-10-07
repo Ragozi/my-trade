@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from my_trade.data import normalize_symbol
 from my_trade.observability.journal import Journal
 from my_trade.research.history import (
     all_closed_trades_from_events,
@@ -53,11 +54,11 @@ class ResearchMemoryStore:
             except Exception as exc:
                 _log.debug("skip invalid reflection: %s", exc)
         self._thesis_by_symbol = {
-            str(k).upper(): str(v) for k, v in (raw.get("thesis_cache") or {}).items()
+            normalize_symbol(str(k)): str(v) for k, v in (raw.get("thesis_cache") or {}).items()
         }
         for sym, item in (raw.get("stance_cache") or {}).items():
             try:
-                self._stance_by_symbol[str(sym).upper()] = TradeIdea.model_validate(item)
+                self._stance_by_symbol[normalize_symbol(str(sym))] = TradeIdea.model_validate(item)
             except Exception as exc:
                 _log.debug("skip invalid stance for %s: %s", sym, exc)
 
@@ -98,7 +99,7 @@ class ResearchMemoryStore:
         fallbacks) and must not sticky-block entries for the rest of the day.
         """
         for idea in ideas:
-            sym = idea.symbol.upper()
+            sym = normalize_symbol(idea.symbol)
             if idea.action.value in ("avoid", "hold") and idea.confidence <= 0.0:
                 continue
             self._stance_by_symbol[sym] = idea
@@ -111,7 +112,7 @@ class ResearchMemoryStore:
         if symbol is None:
             self._stance_by_symbol.clear()
         else:
-            self._stance_by_symbol.pop(symbol.upper(), None)
+            self._stance_by_symbol.pop(normalize_symbol(symbol), None)
         self._save()
 
     @property
@@ -120,7 +121,7 @@ class ResearchMemoryStore:
 
     def stance_for_symbol(self, symbol: str) -> TradeIdea | None:
         """Last known research stance — used when the current cycle skipped research."""
-        return self._stance_by_symbol.get(symbol.upper())
+        return self._stance_by_symbol.get(normalize_symbol(symbol))
 
     def record_close(
         self,
@@ -132,7 +133,7 @@ class ResearchMemoryStore:
         unrealized_pl: float,
         closed_at: datetime,
     ) -> ClosedTradeReflection:
-        thesis = self._thesis_by_symbol.get(symbol.upper(), "")
+        thesis = self._thesis_by_symbol.get(normalize_symbol(symbol), "")
         reflection = build_reflection(
             symbol=symbol,
             exit_reason=exit_reason,
@@ -159,7 +160,7 @@ class ResearchMemoryStore:
         """Record a loss learned when the broker closed a position we did not exit cleanly."""
         exit_reason = "broker_close"
         stacked = f" ({entry_count} entries today)" if entry_count > 1 else ""
-        thesis = self._thesis_by_symbol.get(symbol.upper(), "")
+        thesis = self._thesis_by_symbol.get(normalize_symbol(symbol), "")
         reflection = build_reflection(
             symbol=symbol,
             exit_reason=exit_reason,

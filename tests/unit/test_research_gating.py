@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from my_trade.core.execution import ExecutionOutcome, ExecutionStatus
+from my_trade.core.models import OrderSide
 from my_trade.core.monitoring.models import ActionKind
 from my_trade.core.monitoring.orchestrator import TradingOrchestrator
 from my_trade.core.monitoring.store import DailyStateStore
-from my_trade.core.execution import ExecutionOutcome, ExecutionStatus
 from my_trade.core.risk import RiskLimits
 from my_trade.core.strategy.models import ScanEvaluation, Signal
-from my_trade.core.models import OrderSide
 from my_trade.research.advisor import ResearchAdvisor, ResearchConfig
 from my_trade.research.client import MockClaudeResearchClient
 from my_trade.research.gating import allows_entry_with_gates, research_veto_reason
@@ -137,7 +137,6 @@ def test_weak_sticky_avoid_is_ignored() -> None:
 
 
 def test_sticky_not_used_when_fresh_proposal_overrides() -> None:
-    skipped = ClaudeProposal(skipped=True, skip_reason="daily budget exhausted")
     sticky = TradeIdea(
         symbol="AAPL",
         action=TradeAction.AVOID,
@@ -347,6 +346,106 @@ def test_orchestrator_blocks_sticky_avoid_when_research_skipped() -> None:
     result = orch.run_cycle(datetime(2026, 7, 1, 15, 0, tzinfo=UTC))
     assert any(
         a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "AAPL" for a in result.actions
+    )
+    assert not any(a.kind is ActionKind.ENTRY_SUBMITTED for a in result.actions)
+
+
+def test_orchestrator_blocks_sticky_avoid_when_research_window_skipped() -> None:
+    import tempfile
+    from pathlib import Path
+
+    from my_trade.core.monitoring.account import AccountSnapshot
+    from my_trade.research.memory import ResearchMemoryStore
+
+    class _StubAccount:
+        def get_snapshot(self):  # type: ignore[no-untyped-def]
+            return AccountSnapshot(equity=100_000.0, cash=100_000.0, positions=())
+
+    class _StubData:
+        def get_bars(self, symbol, timeframe, limit=None):  # type: ignore[no-untyped-def]
+            import pandas as pd
+
+            return pd.DataFrame()
+
+    class _SignalStrategy:
+        def detect_entry(self, symbol, df_1m, df_5m, df_15m, now=None):  # type: ignore[no-untyped-def]
+            sig = Signal(
+                symbol=symbol,
+                side=OrderSide.BUY,
+                entry_price=100.0,
+                stop_price=98.0,
+                take_profit_price=103.0,
+                confidence=0.83,
+            )
+            return sig, ScanEvaluation(eligible=True, summary="yes")
+
+        def detect_exit(self, df_1m, entry_time, entry_price, now):  # type: ignore[no-untyped-def]
+            return None
+
+    class _StubExecution:
+        def execute_entry(self, intent, account, *, now=None):  # type: ignore[no-untyped-def]
+            raise AssertionError("entry should be blocked by sticky avoid")
+
+        def close_position(self, symbol, *, now=None):  # type: ignore[no-untyped-def]
+            raise AssertionError("no close expected")
+
+    class _WindowSkippedAdvisor:
+        config = ResearchConfig(
+            enabled=True,
+            block_avoid_for_entry=True,
+            block_hold_for_entry=True,
+            require_approval_for_entry=False,
+            market_hours_only=True,
+        )
+
+        def is_active_for(self, asset_class: str) -> bool:
+            return True
+
+        def propose(self, context, *, when):  # type: ignore[no-untyped-def]
+            raise AssertionError("outside-window research should skip before API call")
+
+        def entry_veto_reason(self, symbol, proposal, *, sticky_idea=None):  # type: ignore[no-untyped-def]
+            return research_veto_reason(
+                proposal,
+                symbol,
+                min_confidence=0.55,
+                block_avoid=True,
+                block_hold=True,
+                require_long_approval=False,
+                sticky_idea=sticky_idea,
+            )
+
+    mem_path = Path(tempfile.mkdtemp()) / "memory.json"
+    memory = ResearchMemoryStore(mem_path)
+    memory.note_proposals(
+        (
+            TradeIdea(
+                symbol="BTC/USD",
+                action=TradeAction.AVOID,
+                confidence=0.85,
+                thesis="Weak overnight setup",
+            ),
+        )
+    )
+    tmp = Path(tempfile.mkdtemp()) / "daily.json"
+    orch = TradingOrchestrator(
+        data=_StubData(),
+        strategy=_SignalStrategy(),
+        execution=_StubExecution(),
+        account=_StubAccount(),
+        store=DailyStateStore(tmp),
+        limits=RiskLimits(),
+        max_entries_per_symbol_per_day=1,
+        symbols=("BTC/USD",),
+        asset_class="crypto",
+        session_is_open=lambda _now: True,
+        research_advisor=_WindowSkippedAdvisor(),
+        research_memory=memory,
+    )
+    result = orch.run_cycle(datetime(2026, 7, 1, 2, 0, tzinfo=UTC))
+    assert any(
+        a.kind is ActionKind.RESEARCH_NOT_APPROVED and a.symbol == "BTC/USD"
+        for a in result.actions
     )
     assert not any(a.kind is ActionKind.ENTRY_SUBMITTED for a in result.actions)
 
