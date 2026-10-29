@@ -16,8 +16,14 @@ from .models import BarSnapshot, StrategyParams
 def rolling_vwap(df: pd.DataFrame) -> pd.Series:
     """Session-style cumulative VWAP over the provided window."""
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
-    cum_vol = df["volume"].cumsum()
-    cum_tp_vol = (typical * df["volume"]).cumsum()
+    dollar_volume = typical * df["volume"]
+    if isinstance(df.index, pd.DatetimeIndex):
+        session = pd.Series(df.index.normalize(), index=df.index)
+        cum_vol = df["volume"].groupby(session).cumsum()
+        cum_tp_vol = dollar_volume.groupby(session).cumsum()
+    else:
+        cum_vol = df["volume"].cumsum()
+        cum_tp_vol = dollar_volume.cumsum()
     return cum_tp_vol / cum_vol.replace(0, float("nan"))
 
 

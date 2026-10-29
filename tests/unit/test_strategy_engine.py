@@ -11,6 +11,7 @@ from my_trade.core.strategy import (
     StrategyParams,
     add_indicators,
     extract_snapshot,
+    rolling_vwap,
 )
 
 
@@ -40,6 +41,31 @@ class TestIndicators:
     def test_add_indicators_empty_passthrough(self) -> None:
         empty = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         assert add_indicators(empty, StrategyParams()).empty
+
+    def test_rolling_vwap_resets_each_session(self) -> None:
+        df = pd.DataFrame(
+            {
+                "open": [100.0, 100.0, 200.0, 150.0],
+                "high": [100.0, 100.0, 200.0, 150.0],
+                "low": [100.0, 100.0, 200.0, 150.0],
+                "close": [100.0, 100.0, 200.0, 150.0],
+                "volume": [1_000.0, 1_000.0, 1_000.0, 1_000.0],
+            },
+            index=pd.DatetimeIndex(
+                [
+                    "2026-07-08 19:58",
+                    "2026-07-08 19:59",
+                    "2026-07-09 13:30",
+                    "2026-07-09 13:31",
+                ],
+                tz="UTC",
+            ),
+        )
+
+        vwap = rolling_vwap(df)
+
+        assert vwap.iloc[2] == 200.0
+        assert vwap.iloc[3] == 175.0
 
     def test_extract_snapshot_none_when_too_short(self) -> None:
         df = add_indicators(_frame([100.0]), StrategyParams())
