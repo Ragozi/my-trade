@@ -33,12 +33,11 @@ def passes(candidate: Candidate, criteria: ScreenerCriteria) -> bool:
         return False
     if candidate.gap_pct < criteria.min_gap_pct:
         return False
-    # Gap-and-go: overnight gap up AND still green on the lookback (premarket).
-    if criteria.require_premarket_up:
-        if candidate.gap_pct <= 0:
-            return False
-        if candidate.change_pct < 0:
-            return False
+    # Gap-and-go: require the explicit overnight gap signal. ``change_pct`` may
+    # span prior-session bars before enough premarket bars exist, so do not let
+    # that cross-session lookback veto a valid gap-up mover.
+    if criteria.require_premarket_up and candidate.gap_pct <= 0:
+        return False
     return criteria.min_atr_pct <= candidate.atr_pct <= criteria.max_atr_pct
 
 
