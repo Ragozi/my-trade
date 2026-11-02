@@ -208,8 +208,14 @@ class TestFilters:
         assert (
             passes(candidate("A", atr=0.02, dv=1000, chg=0.01, gap=0.05), crit) is True
         )
+        # The intraday lookback can cross into yesterday's session before enough
+        # premarket bars exist; the real overnight gap should not be vetoed.
         assert (
             passes(candidate("B", atr=0.02, dv=1000, chg=-0.01, gap=0.05), crit)
+            is True
+        )
+        assert (
+            passes(candidate("C", atr=0.02, dv=1000, chg=0.05, gap=-0.01), crit)
             is False
         )
 
